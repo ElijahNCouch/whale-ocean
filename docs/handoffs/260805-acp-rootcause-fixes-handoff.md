@@ -62,7 +62,7 @@ mutating-arg loop cap test and healthy-160-round completion).
      — pre-existing DATA RACE, as the dead session already documented.
    `-race` re-run green on defaults, compact, acp, cmd/whale-acp,
    llm/deepseek, agent, and the app config/transport tests.
-2. **Docs: DONE.** `docs/configuration.en.md` + `docs/configuration.md`
+2. **Docs: DONE.** `docs/configuration.md` + `docs/configuration.md`
    (Chinese): `web_search` section rewritten to "where search runs" (transport
    decoupled); new `api` section (`responses | chat_completions | auto`, strict
    grammar, compat rules incl. the chat_completions+server degrade);

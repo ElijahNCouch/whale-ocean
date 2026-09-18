@@ -7,6 +7,7 @@ import "github.com/charmbracelet/lipgloss"
 // theme configuration yet.
 type Palette struct {
 	Text       lipgloss.Color
+	Background lipgloss.Color
 	Accent     lipgloss.Color
 	Assistant  lipgloss.Color
 	Border     lipgloss.Color
@@ -34,31 +35,72 @@ type Palette struct {
 	ResultRunning  lipgloss.Color
 }
 
+// Deep-water ramp, darkest first. Everything structural — the frame fill, the
+// raised blocks a prompt or plan sits on, borders and dimmed text — comes from
+// this ladder, so the chrome reads as one body of water rather than as grey
+// boxes that happen to sit on a blue field.
+//
+// The base is pushed dark and saturated on purpose: these are the colours the
+// signal palette below is seen against, and a neon cyan only reads as neon
+// when the water behind it is deep.
+const (
+	abyss   = "#041427" // frame fill
+	trench  = "#0a2a44" // raised block (plan)
+	shelf   = "#0b2f4d" // raised block (user prompt)
+	current = "#10496b" // selection wash
+	reef    = "#1f6b9e" // borders
+	shallow = "#2f7fa8" // subtle dividers
+	foam    = "#8fd0f0" // dimmed text
+	spray   = "#e6f7ff" // body text
+)
+
+// Signal colours, run at full saturation. These are lit rather than tinted:
+// bioluminescence against deep water, not pastels on navy.
+//
+// Two of them break out of the blues on purpose. A warning takes a sandbar
+// amber and an error a hot coral, because an alarm that shares the hue of the
+// chrome is an alarm nobody sees. Everything else stays in the water.
+const (
+	electric = "#00d9ff" // brand, user accent
+	glacier  = "#3df0ff" // assistant
+	iceBlue  = "#7af0ff"
+	openBlue = "#2b8bff"
+	aqua     = "#00e5c0" // tools
+	seafoam  = "#00f5a0" // success
+	anemone  = "#b06cff" // shell operators, search
+	sandbar  = "#ffae00" // warnings
+	amber    = "#ffd23f" // timeouts
+	coral    = "#ff3d6e" // errors
+	deepRed  = "#ff1f4f" // hard failures
+	current2 = "#59c9ff" // running
+)
+
 var Default = Palette{
-	Text:           lipgloss.Color(""),
-	Accent:         lipgloss.Color("63"),
-	Assistant:      lipgloss.Color("39"),
-	Border:         lipgloss.Color("240"),
-	Muted:          lipgloss.Color("245"),
-	Subtle:         lipgloss.Color("240"),
-	Info:           lipgloss.Color("111"),
-	InfoSoft:       lipgloss.Color("86"),
-	Success:        lipgloss.Color("78"),
-	Warn:           lipgloss.Color("220"),
-	Error:          lipgloss.Color("203"),
-	Palette:        lipgloss.Color("212"),
-	StatusIdle:     lipgloss.Color("86"),
-	Selection:      lipgloss.Color("240"),
-	UserAccent:     lipgloss.Color("63"),
-	UserBackground: lipgloss.Color("236"),
-	Plan:           lipgloss.Color("75"),
-	PlanBackground: lipgloss.Color("236"),
-	Tool:           lipgloss.Color("220"),
-	Result:         lipgloss.Color("81"),
-	ResultDenied:   lipgloss.Color("214"),
-	ResultTimeout:  lipgloss.Color("215"),
-	ResultError:    lipgloss.Color("197"),
-	ResultRunning:  lipgloss.Color("117"),
+	Text:           lipgloss.Color(spray),
+	Background:     lipgloss.Color(abyss),
+	Accent:         lipgloss.Color(electric),
+	Assistant:      lipgloss.Color(glacier),
+	Border:         lipgloss.Color(reef),
+	Muted:          lipgloss.Color(foam),
+	Subtle:         lipgloss.Color(shallow),
+	Info:           lipgloss.Color(openBlue),
+	InfoSoft:       lipgloss.Color(iceBlue),
+	Success:        lipgloss.Color(seafoam),
+	Warn:           lipgloss.Color(sandbar),
+	Error:          lipgloss.Color(coral),
+	Palette:        lipgloss.Color(anemone),
+	StatusIdle:     lipgloss.Color(aqua),
+	Selection:      lipgloss.Color(current),
+	UserAccent:     lipgloss.Color(electric),
+	UserBackground: lipgloss.Color(shelf),
+	Plan:           lipgloss.Color(openBlue),
+	PlanBackground: lipgloss.Color(trench),
+	Tool:           lipgloss.Color(aqua),
+	Result:         lipgloss.Color(glacier),
+	ResultDenied:   lipgloss.Color(sandbar),
+	ResultTimeout:  lipgloss.Color(amber),
+	ResultError:    lipgloss.Color(deepRed),
+	ResultRunning:  lipgloss.Color(current2),
 }
 
 func UserPromptStyle() lipgloss.Style {

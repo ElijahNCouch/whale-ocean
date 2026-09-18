@@ -71,6 +71,25 @@ func (m model) View() string {
 		}
 		out = body + separator + bottom
 	}
+	if m.width > 0 {
+		// Wash the frame in the deep-water fill so the chrome and the terminal
+		// behind it are one surface. Only each line is padded to the width:
+		// forcing the block to m.height appends blank rows and pushes the
+		// footer off the bottom of the frame.
+		fill := lipgloss.NewStyle().Background(tuitheme.Default.Background)
+		lines := strings.Split(out, "\n")
+		for i, line := range lines {
+			// Pad by hand rather than with Width(): lipgloss wraps anything
+			// wider than the style, which would break a long approval prompt
+			// across lines instead of just extending its background.
+			pad := m.width - lipgloss.Width(line)
+			if pad < 0 {
+				pad = 0
+			}
+			lines[i] = fill.Render(line) + fill.Render(strings.Repeat(" ", pad))
+		}
+		out = strings.Join(lines, "\n")
+	}
 	recordFrame(start, out, m.page, m.width, m.height)
 	m.rememberView(out)
 	return out

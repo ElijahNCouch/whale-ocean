@@ -22,6 +22,7 @@ import (
 
 const (
 	defaultBaseURL               = "https://api.deepseek.com"
+	copilotBaseURL               = "https://api.githubcopilot.com"
 	defaultStreamMaxAttempts     = 6
 	defaultStreamIdleTimeout     = 90 * time.Second
 	maxToolResultReplayTokens    = 2000
@@ -32,8 +33,42 @@ const (
 
 var errIncompleteStream = errors.New("stream disconnected before completion")
 
+// deepSeekNative reports whether the endpoint understands DeepSeek's own
+// extensions: the thinking block, reasoning_effort, the Responses API and
+// prefix completion. An unset provider counts as DeepSeek because that is this
+// client's origin and what an unconfigured install has always meant. Gating on
+// "is DeepSeek" rather than "is not Copilot" matters because every other
+// OpenAI-compatible endpoint rejects the extra fields outright.
+func (c *Client) deepSeekNative() bool {
+	p := strings.ToLower(strings.TrimSpace(c.provider))
+	return p == "" || p == defaults.ProviderDeepSeek
+}
+
+func (c *Client) keyEnv() string {
+	if p, ok := defaults.ProviderByID(c.provider); ok && p.KeyEnv != "" {
+		return p.KeyEnv
+	}
+	return "DEEPSEEK_API_KEY"
+}
+
+func (c *Client) needsKey() bool {
+	if p, ok := defaults.ProviderByID(c.provider); ok {
+		return p.NeedsKey()
+	}
+	return true
+}
+
+func (c *Client) providerLabel() string {
+	if p, ok := defaults.ProviderByID(c.provider); ok {
+		return p.Label
+	}
+	return "DeepSeek"
+}
+
 type Client struct {
+	provider                string
 	apiKey                  string
+	copilotToken            string
 	baseURL                 string
 	httpClient              *http.Client
 	model                   string
@@ -52,6 +87,16 @@ type Client struct {
 }
 
 type Option func(*Client)
+
+func WithProvider(provider string) Option {
+	return func(c *Client) {
+		c.provider = strings.ToLower(strings.TrimSpace(provider))
+		if c.provider == "github-copilot" {
+			c.baseURL = copilotBaseURL
+			c.thinkingEnabled = false
+		}
+	}
+}
 
 type MultimodalConfig struct {
 	Enabled   bool
@@ -163,7 +208,8 @@ func withRetrySleeper(s llmretry.Sleeper) Option {
 
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		baseURL: strings.TrimRight(envOr("DEEPSEEK_BASE_URL", defaultBaseURL), "/"),
+		provider: "deepseek",
+		baseURL:  strings.TrimRight(envOr("DEEPSEEK_BASE_URL", defaultBaseURL), "/"),
 		httpClient: &http.Client{
 			Timeout: 11 * time.Minute,
 		},
@@ -180,10 +226,19 @@ func New(opts ...Option) (*Client, error) {
 		opt(c)
 	}
 	if strings.TrimSpace(c.apiKey) == "" {
-		c.apiKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
+		c.apiKey = strings.TrimSpace(os.Getenv(c.keyEnv()))
+		if c.provider == "github-copilot" {
+			token, err := c.exchangeGitHubToken()
+			if err != nil {
+				return nil, err
+			}
+			c.copilotToken = token
+		}
 	}
-	if strings.TrimSpace(c.apiKey) == "" {
-		return nil, errors.New("DeepSeek API key is not configured. Run `whale setup` to save one for Whale, or set `DEEPSEEK_API_KEY` in your environment")
+	// A model served from the user's own machine has no credential to check,
+	// so demanding one here would make the only zero-setup provider unusable.
+	if strings.TrimSpace(c.apiKey) == "" && c.needsKey() {
+		return nil, fmt.Errorf("no API key for %s. Run `whale setup` to save one, or set %s in your environment", c.providerLabel(), c.keyEnv())
 	}
 	if c.baseURL == "" {
 		c.baseURL = defaultBaseURL
@@ -199,6 +254,36 @@ func New(opts ...Option) (*Client, error) {
 		c.streamIdleTimeout = defaultStreamIdleTimeout
 	}
 	return c, nil
+}
+
+func (c *Client) exchangeGitHubToken() (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/copilot_internal/v2/token", nil)
+	if err != nil {
+		return "", fmt.Errorf("build GitHub Copilot authentication request: %w", err)
+	}
+	req.Header.Set("Authorization", "token "+c.apiKey)
+	req.Header.Set("Editor-Version", "Whale/1.0")
+	req.Header.Set("Editor-Plugin-Version", "whale/1.0")
+	req.Header.Set("User-Agent", "Whale")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GitHub Copilot authentication request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return "", fmt.Errorf("GitHub Copilot authentication failed (%s): %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode GitHub Copilot authentication response: %w", err)
+	}
+	if strings.TrimSpace(payload.Token) == "" {
+		return "", errors.New("GitHub Copilot authentication response did not include a Copilot token")
+	}
+	return strings.TrimSpace(payload.Token), nil
 }
 
 func envOr(name, fallback string) string {
@@ -245,9 +330,11 @@ func (c *Client) stream(ctx context.Context, history []core.Message, tools []cor
 		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
 		"messages":       msgs,
-		"thinking":       map[string]any{"type": "disabled"},
 	}
-	if c.thinkingEnabled {
+	if c.deepSeekNative() {
+		payload["thinking"] = map[string]any{"type": "disabled"}
+	}
+	if c.thinkingEnabled && c.deepSeekNative() {
 		payload["thinking"] = map[string]any{"type": "enabled"}
 		if strings.TrimSpace(c.reasoningEffort) != "" {
 			payload["reasoning_effort"] = c.reasoningEffort
@@ -439,9 +526,17 @@ func (c *Client) sendStreamRequestWithKeyPath(ctx context.Context, requestBaseUR
 	if err != nil {
 		return nil, &requestBuildError{err: fmt.Errorf("new request: %w", err)}
 	}
+	if c.provider == "github-copilot" && c.copilotToken != "" {
+		apiKey = c.copilotToken
+	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	if c.provider == "github-copilot" {
+		req.Header.Set("Editor-Version", "whale/1.0")
+		req.Header.Set("Copilot-Integration-Id", "whale")
+		req.Header.Set("User-Agent", "Whale")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

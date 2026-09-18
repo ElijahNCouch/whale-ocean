@@ -1,82 +1,90 @@
-# MCP
+# MCP (Model Context Protocol)
 
-Whale can load tools from MCP servers at startup.
+Whale can load tools from MCP servers at startup. MCP tools are registered
+as normal Whale tools with names like `mcp__server__tool`.
 
-MCP tools are registered as normal Whale tools with names like `mcp__server__tool`. Normal approval behavior still applies.
-Whale does not inspect MCP tool arguments for filesystem paths; configure filesystem access in the MCP server itself and use `[permissions.mcp]` or `disabled_tools` to control which MCP tools can run.
-If you previously relied on Whale-side path checks for `@modelcontextprotocol/server-filesystem`, move those limits into the filesystem server's own directory arguments and use `[permissions.mcp]` only for tool-level `allow`, `ask`, or `deny` rules.
+> MCP lets you connect Whale to databases, APIs, browser automation,
+> and 1,000+ other tools through a standard protocol.
 
-## Config file
+---
 
-By default, Whale reads:
+## Quick Setup
 
-```text
-~/.whale/mcp.json
+### 1. Create or edit `~/.whale/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  }
+}
 ```
 
-On Windows this resolves under `%USERPROFILE%\.whale` by default. If `WHALE_HOME`
-is set, Whale reads the default MCP config from `$WHALE_HOME/mcp.json`.
+### 2. Restart Whale
 
-You can use another file by setting `[mcp].config_path` in `config.toml`:
+MCP servers are loaded at startup. After restarting, run `/mcp` in the TUI
+to check that your server is connected.
+
+---
+
+## Supported Transports
+
+| Transport | When to use | Example |
+|---|---|---|
+| **stdio** | Local servers (npx, pip, go binaries) | `npx -y some-mcp-server` |
+| **Streamable HTTP** | Remote servers over HTTP | `url: "https://example.com/mcp"` |
+
+Whale does not currently support SSE MCP servers.
+
+---
+
+## Config File
+
+Default path: `~/.whale/mcp.json` (or `$WHALE_HOME/mcp.json` if set).
+
+Custom path via `config.toml`:
 
 ```toml
 [mcp]
 config_path = "/path/to/mcp.json"
 ```
 
-Whale reads MCP config when the process starts. Restart Whale after editing the file.
-Servers are started concurrently, so `/mcp` can show some servers as `starting`
-while other servers are already connected and usable.
+On Windows, the default path resolves under `%USERPROFILE%\\.whale`.
 
-## Supported transports
+---
 
-Whale currently supports:
+## ACP (whale-acp)
 
-- stdio MCP servers using `command` and `args`
-- Streamable HTTP MCP servers using `url` and optional `headers`
+The ACP agent (`whale-acp`) reads the same `~/.whale/mcp.json` baseline and
+merges it with the `mcpServers` an ACP client sends on `session/new` and
+`session/load` (client wins on name conflicts).
 
-Whale does not currently support SSE MCP servers.
+- Client-supplied servers must be stdio: whale-acp advertises
+  `mcpCapabilities {http: false, sse: false}` and rejects http/sse ones.
+- The local baseline is passed through unchanged, so an http server in
+  `~/.whale/mcp.json` still connects (same as the main app) even though the
+  client-facing advertisement is stdio-only.
+- MCP tools are lazy-loaded: the schema starts with only `tool_search`; the
+  model selects tools to activate them. Call `tool_search` with an empty
+  query to list available tools (it serves the `<available-deferred-tools>`
+  block). ACP sessions have no `/mcp` command — check the agent's stderr log
+  for server state instead.
+- `session/new` waits while servers connect (per-server timeout, default
+  15s), so a slow server delays session creation.
 
-## Config format
+**Security:** the ACP host is fully trusted — it controls `cwd`, may supply
+`mcpServers` (arbitrary stdio processes), and can drive any tool. whale-acp
+defaults permissions to **ask** (`permissions.default = "ask"`): operations not explicitly
+allowed prompt the user via `session/request_permission`. Restore the
+permissive behavior with `permissions.default = "allow"` in `config.toml`, or tighten
+further with `permissions.default = "deny"` plus explicit `permissions` sections.
 
-Put servers under `mcpServers`:
+## Examples
 
-```json
-{
-  "mcpServers": {
-    "server-name": {
-      "command": "npx",
-      "args": ["-y", "some-mcp-server"]
-    }
-  }
-}
-```
-
-Whale also accepts `servers`, but `mcpServers` is the recommended format because it matches common MCP examples.
-
-## ACP（whale-acp）
-
-ACP 代理（`whale-acp`）读取同一个 `~/.whale/mcp.json` 基线，并与 ACP 客户端在
-`session/new`、`session/load` 中发送的 `mcpServers` 合并（名称冲突时客户端优先）。
-
-- 客户端下发的服务必须为 stdio：whale-acp 声明 `mcpCapabilities {http: false, sse: false}`，
-  并拒绝 http/sse 服务。
-- 本地基线原样透传，因此 `~/.whale/mcp.json` 中的 http 服务仍会连接（与主程序一致），
-  即使面向客户端的声明仅为 stdio。
-- MCP 工具为懒加载：schema 起始只有 `tool_search`，由模型按需选中激活。
-  以空查询调用 `tool_search` 可列出可用工具（返回 `<available-deferred-tools>` 块）。
-  ACP 会话没有 `/mcp` 命令，可查看代理 stderr 日志确认服务状态。
-- `session/new` 会等待服务连接完成（单服务超时，默认 15s），慢服务会延迟会话创建。
-
-**安全：** ACP 宿主完全可信——它控制 `cwd`、可提供 `mcpServers`（任意 stdio 进程），
-并驱动所有工具。whale-acp 默认权限为 **ask**（`permissions.default = "ask"`）：未显式允许的
-操作会通过 `session/request_permission` 请求用户批准。如需恢复宽松行为，在
-`config.toml` 中设置 `permissions.default = "allow"`；如需更严格，设置 `permissions.default = "deny"` 并
-配以显式 `permissions` 段。
-
-## stdio examples
-
-Filesystem server:
+### stdio — Filesystem server
 
 ```json
 {
@@ -90,7 +98,7 @@ Filesystem server:
 }
 ```
 
-Context7 server:
+### stdio — Context7 (documentation search)
 
 ```json
 {
@@ -103,25 +111,7 @@ Context7 server:
 }
 ```
 
-If the server requires an API key, prefer environment variables instead of committing secrets to the config:
-
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp",
-        "--api-key",
-        "${CONTEXT7_API_KEY}"
-      ]
-    }
-  }
-}
-```
-
-## Streamable HTTP example
+### Streamable HTTP — Remote server
 
 ```json
 {
@@ -138,19 +128,24 @@ If the server requires an API key, prefer environment variables instead of commi
 }
 ```
 
-`type` may be `http`, `streamable-http`, `streamable_http`, or `streamablehttp`.
+`type` can be `http`, `streamable-http`, `streamable_http`, or `streamablehttp`.
 
-Header values and stdio env values can reference environment variables with `${NAME}`. Whale fails startup for that server if the variable is missing.
+Environment variables in config values: use `${NAME}` syntax. Whale fails
+startup for that server if the variable is missing.
 
-## Optional fields
+---
 
-- `timeout`: startup and call timeout in seconds. Default: `15`.
-- `disabled`: set to `true` to skip a server.
-- `disabled_tools`: list of original MCP tool names to hide from Whale. Use the tool name reported by the MCP server, such as `read_file` or `write_file`, not Whale's registered `mcp__server__tool` name.
-- `env`: environment variables for stdio servers.
-- `headers`: HTTP headers for Streamable HTTP servers.
+## Optional Fields
 
-Example:
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timeout` | number | `15` | Startup and call timeout in seconds |
+| `disabled` | boolean | `false` | Skip this server |
+| `disabled_tools` | string[] | `[]` | Hide specific tools (use the original MCP tool name, e.g. `read_file`) |
+| `env` | object | `{}` | Environment variables for stdio servers |
+| `headers` | object | `{}` | HTTP headers for Streamable HTTP servers |
+
+### Example: Restrict a filesystem server to read-only
 
 ```json
 {
@@ -164,19 +159,20 @@ Example:
 }
 ```
 
-## Check status
+---
 
-Inside the TUI, run:
+## Check Status
+
+In the TUI, run:
 
 ```text
 /mcp
 ```
 
-It shows the config path, server count, connection status, tool count, and startup errors.
+It shows the config path, server count, connection status, tool count,
+and startup errors.
 
-Example:
-
-```text
+```
 MCP Tools
 
 config: /Users/me/.whale/mcp.json
@@ -192,48 +188,37 @@ servers: 2
   status: failed
   auth: bearer token
   url: https://example.com/mcp
-  http headers: Authorization=*****
-  tools: none
-  error: mcp server "remote" failed during connect: ... (transport=http url=https://example.com/mcp status=401 Unauthorized)
+  error: mcp server "remote" failed during connect: ... status=401 Unauthorized
 ```
 
-## Smoke test
+---
 
-For a user-path regression with a real model call, run:
+## Common Issues
 
-```sh
-DEEPSEEK_API_KEY=... scripts/smoke/mcp_tools.sh
-```
-
-The smoke uses a temporary `WHALE_HOME`, probes `/mcp` through the TUI, verifies
-secret-like MCP command arguments are redacted, and runs `whale exec` to confirm
-the model can call the configured filesystem MCP tool.
-
-## Common issues
-
-If only one server appears, make sure every server is inside `mcpServers`:
+**Only one server shows up.** Make sure every server is inside `mcpServers`:
 
 ```json
 {
   "mcpServers": {
-    "fs": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-    },
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    }
+    "fs": { "command": "npx", "args": ["-y", "server-filesystem", "/tmp"] },
+    "context7": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"] }
   }
 }
 ```
 
-Do not put a server at the top level next to `mcpServers`; Whale will not load it.
+Do not put a server at the top level next to `mcpServers`.
 
-For HTTP servers:
+**HTTP errors:**
+- `401` / `403` — check `headers`, API keys, and env variables
+- `404` — check the URL is the MCP endpoint, not a homepage
+- `429` / `5xx` — check provider rate limits or service status
 
-- `401` or `403`: check `headers`, API keys, and environment variables.
-- `404`: check that the URL is the MCP endpoint, not a product homepage or API root.
-- `429` or `5xx`: check provider rate limits or service status.
+---
 
-Whale omits query strings from HTTP startup errors, but config files can still contain secrets. Do not commit `~/.whale/mcp.json`.
+## Security Notes
+
+- Whale does not inspect MCP tool arguments for filesystem paths.
+  Configure filesystem access in the MCP server itself.
+- Use `[permissions.mcp]` in `config.toml` to set `allow` / `ask` / `deny` per server.
+- Do not commit `~/.whale/mcp.json` — it may contain secrets.
+- Whale redacts secret-like MCP command arguments in `/mcp` output.

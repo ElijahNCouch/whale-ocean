@@ -8,6 +8,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"github.com/usewhale/whale/internal/runtime/protocol"
+	tuitheme "github.com/usewhale/whale/internal/tui/theme"
 )
 
 func assertVisibleWidthAtMost(t *testing.T, lines []string, maxWidth int) {
@@ -55,9 +56,30 @@ func assertBlankLineBetween(t *testing.T, lines []string, before, after string) 
 	t.Fatalf("expected blank line between %q and %q, got: %q", before, after, strings.Join(lines, "\n"))
 }
 
-func containsANSIColor(text, color string) bool {
-	return strings.Contains(text, "\x1b[38;5;"+color+"m") ||
-		strings.Contains(text, "\x1b[1;38;5;"+color+"m")
+// The palette is the source of truth for colour: these assertions ask whether
+// the renderer reached for the right semantic entry, so the expected escape is
+// derived from that entry rather than pinned to a code that changes whenever
+// the theme is retuned.
+func ansiBgOf(c lipgloss.Color) string {
+	rendered := lipgloss.NewStyle().Background(c).Render("x")
+	if i := strings.Index(rendered, "m"); i > 0 {
+		return rendered[:i+1]
+	}
+	return rendered
+}
+
+func ansiOf(c lipgloss.Color) string {
+	rendered := lipgloss.NewStyle().Foreground(c).Render("x")
+	if i := strings.Index(rendered, "m"); i > 0 {
+		return rendered[:i+1]
+	}
+	return rendered
+}
+
+func containsANSIColor(text string, c lipgloss.Color) bool {
+	code := ansiOf(c)
+	return strings.Contains(text, code) ||
+		strings.Contains(text, strings.Replace(code, "[", "[1;", 1))
 }
 
 func TestChatLines_MarkdownBoldAndList(t *testing.T) {
@@ -104,12 +126,12 @@ func TestChatLines_FocusSummaryUsesStructuredStyles(t *testing.T) {
 		}
 	}
 	raw := strings.Join(lines, "\n")
-	for _, color := range []string{"212", "111", "220", "245"} {
+	for _, color := range []lipgloss.Color{tuitheme.Default.Palette, tuitheme.Default.Info, tuitheme.Default.Tool, tuitheme.Default.Muted} {
 		if !containsANSIColor(raw, color) {
 			t.Fatalf("expected focus summary color %s in %q", color, raw)
 		}
 	}
-	if strings.Contains(raw, "\x1b[38;5;78m") {
+	if containsANSIColor(raw, tuitheme.Default.Success) {
 		t.Fatalf("focus summary should not use success green for completed work, got %q", raw)
 	}
 	assertVisibleWidthAtMost(t, lines, 80)
@@ -161,7 +183,7 @@ func TestChatLines_FocusSummaryStylesFromState(t *testing.T) {
 	}}
 
 	raw := strings.Join(ChatLines(entries, 100), "\n")
-	for _, color := range []string{"214", "203", "220", "117", "212"} {
+	for _, color := range []lipgloss.Color{tuitheme.Default.ResultDenied, tuitheme.Default.Error, tuitheme.Default.Warn, tuitheme.Default.ResultRunning, tuitheme.Default.Palette} {
 		if !containsANSIColor(raw, color) {
 			t.Fatalf("expected state-driven focus summary color %s in %q", color, raw)
 		}
@@ -187,7 +209,7 @@ func TestChatLines_FocusSummaryFallsBackToStatusStyle(t *testing.T) {
 	}}
 
 	raw := strings.Join(ChatLines(entries, 100), "\n")
-	for _, color := range []string{"214", "203", "117"} {
+	for _, color := range []lipgloss.Color{tuitheme.Default.ResultDenied, tuitheme.Default.Error, tuitheme.Default.ResultRunning} {
 		if !containsANSIColor(raw, color) {
 			t.Fatalf("expected status fallback focus summary color %s in %q", color, raw)
 		}
@@ -420,7 +442,7 @@ func TestChatLines_ProposedPlanHasDistinctLabel(t *testing.T) {
 	if strings.Contains(joined, "Updated Plan") {
 		t.Fatalf("proposed plan should not use update-plan label, got: %q", joined)
 	}
-	if !strings.Contains(joined, "\x1b[48;5;236m") {
+	if !strings.Contains(joined, ansiBgOf(tuitheme.Default.PlanBackground)) {
 		t.Fatalf("expected proposed plan body background styling, got: %q", joined)
 	}
 	assertBlankLineBetween(t, lines, "Proposed Plan", "Plan")
@@ -452,7 +474,7 @@ func TestChatLines_UserPromptGlyphAndContinuationIndent(t *testing.T) {
 		t.Fatalf("user prompt should not render as a bordered card: %q", joined)
 	}
 	raw := strings.Join(lines, "\n")
-	if !strings.Contains(raw, "\x1b[48;5;236m") {
+	if !strings.Contains(raw, ansiBgOf(tuitheme.Default.UserBackground)) {
 		t.Fatalf("expected user prompt background styling, got: %q", raw)
 	}
 }
@@ -549,10 +571,10 @@ func TestChatLines_SystemNoticeUsesStructuredStyles(t *testing.T) {
 			t.Fatalf("expected structured notice to contain %q, got: %q", want, plain)
 		}
 	}
-	if !containsANSIColor(joined, "78") {
+	if !containsANSIColor(joined, tuitheme.Default.Success) {
 		t.Fatalf("expected success color for approval state, got: %q", joined)
 	}
-	if !containsANSIColor(joined, "220") {
+	if !containsANSIColor(joined, tuitheme.Default.Tool) {
 		t.Fatalf("expected command color for approval command, got: %q", joined)
 	}
 	if strings.Contains(joined, "┃") || strings.Contains(joined, "│") {
@@ -645,7 +667,7 @@ func TestChatLines_LocalStatusRendersStructuredCard(t *testing.T) {
 	if !strings.Contains(joined, "┃") {
 		t.Fatalf("expected local status to render as a bordered card, got:\n%s", joined)
 	}
-	if strings.Contains(raw, "\x1b[38;5;78m") {
+	if containsANSIColor(raw, tuitheme.Default.Success) {
 		t.Fatalf("local status should not use success green, got %q", raw)
 	}
 	assertVisibleWidthAtMost(t, lines, 80)
@@ -694,7 +716,7 @@ func TestChatLines_LocalMCPRendersStructuredSections(t *testing.T) {
 		}
 	}
 	raw := strings.Join(lines, "\n")
-	if strings.Contains(raw, "\x1b[38;5;78m") {
+	if containsANSIColor(raw, tuitheme.Default.Success) {
 		t.Fatalf("local mcp should not use success green, got %q", raw)
 	}
 	assertVisibleWidthAtMost(t, lines, 80)
@@ -921,7 +943,7 @@ func TestRenderCommandLikeStylesCommandAfterOperator(t *testing.T) {
 	if got := xansi.Strip(rendered); got != cmd {
 		t.Fatalf("command rendering changed text:\nwant %q\n got %q", cmd, got)
 	}
-	for _, want := range []string{"\x1b[38;5;111mgit", "\x1b[38;5;212m|", "\x1b[38;5;111mhead", "\x1b[38;5;111mprintf"} {
+	for _, want := range []string{ansiOf(tuitheme.Default.Info) + "git", ansiOf(tuitheme.Default.Palette) + "|", ansiOf(tuitheme.Default.Info) + "head", ansiOf(tuitheme.Default.Info) + "printf"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected styled command token %q, got %q", want, rendered)
 		}
@@ -939,16 +961,16 @@ func TestRenderCommandLikeHighlightsBashSyntax(t *testing.T) {
 		t.Fatalf("command rendering changed text:\nwant %q\n got %q", cmd, got)
 	}
 	for _, want := range []string{
-		"\x1b[38;5;212mfor",
-		"\x1b[38;5;212m;",
-		"\x1b[38;5;81m\"",
-		"\x1b[38;5;245m# comment",
+		ansiOf(tuitheme.Default.Palette) + "for",
+		ansiOf(tuitheme.Default.Palette) + ";",
+		ansiOf(tuitheme.Default.Result) + "\"",
+		ansiOf(tuitheme.Default.Muted) + "# comment",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected bash syntax style %q, got %q", want, rendered)
 		}
 	}
-	if strings.Contains(rendered, "\x1b[38;5;78m") {
+	if containsANSIColor(rendered, tuitheme.Default.Success) {
 		t.Fatalf("command rendering should not use success green, got %q", rendered)
 	}
 }
@@ -1007,37 +1029,37 @@ func TestChatLines_ToolEventStatusWordsUseSemanticColors(t *testing.T) {
 			name: "denied",
 			role: "shell_result_denied",
 			text: "Ran shell command\nDENIED · tool approval denied",
-			ansi: "\x1b[38;5;214m",
+			ansi: ansiOf(tuitheme.Default.ResultDenied),
 		},
 		{
 			name: "warning",
 			role: "result",
 			text: "Ran hook\nWARNING · skipped optional hook",
-			ansi: "\x1b[38;5;220m",
+			ansi: ansiOf(tuitheme.Default.Warn),
 		},
 		{
 			name: "http error",
 			role: "result_http_error",
 			text: "Explored\nFetch https://httpbin.org/status/404\nHTTP 404 Not Found",
-			ansi: "\x1b[38;5;220m",
+			ansi: ansiOf(tuitheme.Default.Warn),
 		},
 		{
 			name: "legacy error token",
 			role: "shell_result_failed",
 			text: "Ran make test\n✗ · command failed",
-			ansi: "\x1b[38;5;203m",
+			ansi: ansiOf(tuitheme.Default.Error),
 		},
 		{
 			name: "command failed label",
 			role: "shell_result_failed",
 			text: "Command failed (exit 2): make test\nCommand failed (exit 2) · 1.2s",
-			ansi: "\x1b[38;5;203m",
+			ansi: ansiOf(tuitheme.Default.Error),
 		},
 		{
 			name: "timeout",
 			role: "shell_result_timeout",
 			text: "Ran sleep 30\nTIMEOUT · 30s",
-			ansi: "\x1b[38;5;215m",
+			ansi: ansiOf(tuitheme.Default.ResultTimeout),
 		},
 	}
 

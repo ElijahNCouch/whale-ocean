@@ -37,7 +37,8 @@ func Execute() error {
 }
 
 func bindPersistentFlags(c *cobra.Command, opts *cliOptions) {
-	c.PersistentFlags().StringVarP(&opts.cfg.Model, "model", "m", opts.cfg.Model, "Model to use ("+strings.Join(defaults.SupportedModels(), "|")+")")
+	c.PersistentFlags().StringVar(&opts.cfg.Provider, "provider", opts.cfg.Provider, "Provider to use ("+strings.Join(providerIDs(), "|")+")")
+	c.PersistentFlags().StringVarP(&opts.cfg.Model, "model", "m", opts.cfg.Model, "Model to use; run whale setup to see each provider's models")
 	c.PersistentFlags().BoolVar(&opts.cfg.ThinkingEnabled, "thinking", opts.cfg.ThinkingEnabled, "Override thinking for this run only")
 	c.PersistentFlags().StringVar(&opts.cfg.ReasoningEffort, "effort", opts.cfg.ReasoningEffort, "Override reasoning effort for this run only (high|max)")
 	c.PersistentFlags().BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "Auto-accept permission prompts for this run; extremely dangerous")
@@ -71,6 +72,7 @@ func runLoop(opts *cliOptions, start app.StartOptions) error {
 			fmt.Println(err.Error())
 			return nil
 		}
+
 		return err
 	}
 	return tui.RunTUI(rt, tui.RunOptions{ResumeMenu: start.ResumeMenu})
@@ -245,6 +247,17 @@ func prepareCLIConfig(cmd *cobra.Command, opts *cliOptions) error {
 		cfg.Model = flagCfg.Model
 		cfg.ModelExplicit = true
 	}
+	if flagChanged(cmd, "provider") {
+		provider := app.NormalizeProvider(flagCfg.Provider)
+		if _, ok := defaults.ProviderByID(provider); !ok {
+			return fmt.Errorf("unsupported provider: %s (supported: %s)", flagCfg.Provider, strings.Join(providerIDs(), ", "))
+		}
+		cfg.Provider = provider
+		cfg.ProviderExplicit = true
+		if !flagChanged(cmd, "model") {
+			cfg.Model = defaults.DefaultModelForProvider(provider)
+		}
+	}
 	if flagChanged(cmd, "thinking") {
 		cfg.ThinkingEnabled = flagCfg.ThinkingEnabled
 	}
@@ -259,8 +272,38 @@ func prepareCLIConfig(cmd *cobra.Command, opts *cliOptions) error {
 		cfg.PermissionDefault = "allow"
 		cfg.AutoAcceptPermissions = true
 	}
+	applyProviderAutodetect(&cfg)
 	opts.cfg = cfg
-	return validateModel(opts.cfg.Model)
+	return validateModel(opts.cfg.Model, opts.cfg.Provider)
+}
+
+// applyProviderAutodetect rescues a fresh install. If nobody named a provider
+// and the default one has no key anywhere, Whale uses whatever this machine can
+// actually reach — a provider the user already has a key for, or a model
+// running locally — instead of starting up dead and demanding a paid account.
+//
+// This lives on the CLI path on purpose. Callers that build a Config
+// themselves, including the tests, get exactly the provider they asked for;
+// only a person running the binary gets the convenience.
+func applyProviderAutodetect(cfg *app.Config) {
+	if cfg.ProviderExplicit {
+		return
+	}
+	creds, err := app.LoadCredentials(cfg.DataDir)
+	if err != nil {
+		return
+	}
+	previous := app.NormalizeProvider(cfg.Provider)
+	resolved := app.ResolveProvider(cfg.Provider, creds)
+	if resolved == previous {
+		return
+	}
+	cfg.Provider = resolved
+	// Only carry the model over when it is the one the previous provider would
+	// have chosen anyway: a model named in config is a choice, not a default.
+	if !cfg.ModelExplicit && strings.EqualFold(cfg.Model, defaults.DefaultModelForProvider(previous)) {
+		cfg.Model = defaults.DefaultModelForProvider(resolved)
+	}
 }
 
 func flagChanged(cmd *cobra.Command, name string) bool {
@@ -277,11 +320,27 @@ func flagChanged(cmd *cobra.Command, name string) bool {
 	return false
 }
 
-func validateModel(v string) error {
-	if !defaults.IsSupportedModel(v) {
-		return fmt.Errorf("unsupported model: %s", v)
+func providerIDs() []string {
+	all := defaults.Providers()
+	out := make([]string, 0, len(all))
+	for _, p := range all {
+		out = append(out, p.ID)
 	}
-	return nil
+	return out
+}
+
+func validateModel(v, provider string) error {
+	for _, model := range defaults.ModelsForProvider(provider) {
+		if strings.EqualFold(strings.TrimSpace(v), model) {
+			return nil
+		}
+	}
+	// Local daemons and routers serve catalogues Whale cannot enumerate, so a
+	// name it does not recognise is not grounds to refuse to start.
+	if defaults.ModelsAreOpen(provider) && strings.TrimSpace(v) != "" {
+		return nil
+	}
+	return fmt.Errorf("unsupported model: %s", v)
 }
 
 func validateEffort(v string) (string, error) {

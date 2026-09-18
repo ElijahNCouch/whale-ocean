@@ -19,6 +19,7 @@ const (
 )
 
 type FileConfig struct {
+	Provider        string `toml:"provider,omitempty"`
 	Model           string `toml:"model,omitempty"`
 	ReasoningEffort string `toml:"reasoning_effort,omitempty"`
 	ThinkingEnabled *bool  `toml:"thinking_enabled,omitempty"`

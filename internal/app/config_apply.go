@@ -13,6 +13,8 @@ import (
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/store"
 	"github.com/usewhale/whale/internal/tools"
+
+	"github.com/usewhale/whale/internal/defaults"
 )
 
 func ApplyLoadedConfig(cfg *Config, loaded LoadedConfig) error {
@@ -29,8 +31,24 @@ func ApplyLoadedConfig(cfg *Config, loaded LoadedConfig) error {
 }
 
 func ApplyFileConfig(cfg *Config, file FileConfig) error {
+	if strings.TrimSpace(file.Provider) != "" {
+		provider := strings.ToLower(strings.TrimSpace(file.Provider))
+		known, ok := defaults.ProviderByID(provider)
+		if !ok {
+			return fmt.Errorf("unsupported provider: %s", file.Provider)
+		}
+		cfg.Provider = provider
+		cfg.ProviderExplicit = true
+		if strings.TrimSpace(file.Model) == "" {
+			cfg.Model = known.DefaultModel()
+		}
+	}
 	if strings.TrimSpace(file.Model) != "" {
 		cfg.Model = strings.TrimSpace(file.Model)
+		// Naming a model in config is a choice even when the name happens to
+		// equal the built-in default, so provider auto-detection must not
+		// treat it as an unset value it may replace.
+		cfg.ModelExplicit = true
 	}
 	if strings.TrimSpace(file.ReasoningEffort) != "" {
 		cfg.ReasoningEffort = strings.TrimSpace(file.ReasoningEffort)
@@ -231,6 +249,9 @@ func LoadAndApplyConfig(cfg Config, workspaceRoot string) (Config, error) {
 func overlayExplicitConfig(dst *Config, src Config) {
 	def := DefaultConfig()
 	dst.DataDir = core.FirstNonEmpty(strings.TrimSpace(src.DataDir), dst.DataDir)
+	if strings.TrimSpace(src.Provider) != "" && src.Provider != def.Provider {
+		dst.Provider = strings.ToLower(strings.TrimSpace(src.Provider))
+	}
 	if src.ModelExplicit || (strings.TrimSpace(src.Model) != "" && src.Model != def.Model) {
 		dst.Model = src.Model
 		dst.ModelExplicit = src.ModelExplicit

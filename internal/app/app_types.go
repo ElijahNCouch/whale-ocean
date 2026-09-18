@@ -25,6 +25,7 @@ const (
 
 type Config struct {
 	DataDir                        string
+	Provider                       string
 	ConfigLoaded                   bool
 	PermissionDefault              policy.PermissionAction
 	PermissionRules                []policy.PermissionRule
@@ -37,6 +38,7 @@ type Config struct {
 	BudgetWarningUSD               float64
 	Model                          string
 	ModelExplicit                  bool
+	ProviderExplicit               bool
 	ReasoningEffort                string
 	ThinkingEnabled                bool
 	CheckForUpdateOnStartup        bool

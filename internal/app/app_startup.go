@@ -35,7 +35,11 @@ func (a *App) StartupLines() []string {
 			lines = append(lines, fmt.Sprintf("mcp: %d server(s), %d connected, %d failed", len(states), connected, failed))
 		}
 	}
-	lines = append(lines, "commands: "+CommandsHelp, "env: DEEPSEEK_API_KEY=...")
+	envName := "DEEPSEEK_API_KEY"
+	if normalizeProvider(a.cfg.Provider) == ProviderGitHubCopilot {
+		envName = "GITHUB_COPILOT_TOKEN"
+	}
+	lines = append(lines, "commands: "+CommandsHelp, "env: "+envName+"=...")
 	if ust, err := session.LoadUserInputState(a.sessionsDir, a.sessionID); err == nil && ust.Pending {
 		lines = append(lines, fmt.Sprintf("pending user input: tool_call=%s questions=%d", ust.ToolCallID, len(ust.Questions)))
 	}

@@ -128,6 +128,10 @@ func NormalizeWebSearchMode(v string) (WebSearchMode, error) {
 // forces chat completions, server/auto use the Responses API when the model
 // supports it.
 func (c *Client) responsesEnabled() bool {
+	// Only DeepSeek serves the Responses API; anyone else gets chat completions.
+	if !c.deepSeekNative() {
+		return false
+	}
 	switch c.api {
 	case APIResponses:
 		return true

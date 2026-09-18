@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-func doctorCheckAPIKey(dataDir string) (DoctorCheck, apiKeySource, string) {
-	key, source, err := resolveDeepSeekAPIKey(dataDir)
+func doctorCheckAPIKey(dataDir string, provider string) (DoctorCheck, apiKeySource, string) {
+	key, source, err := resolveProviderAPIKey(dataDir, provider)
 	if err != nil {
 		return DoctorCheck{
 			Label:  "api key",
@@ -15,10 +15,19 @@ func doctorCheckAPIKey(dataDir string) (DoctorCheck, apiKeySource, string) {
 		}, apiKeySourceMissing, ""
 	}
 	if strings.TrimSpace(key) == "" {
+		// A provider that serves models from this machine has no key to check,
+		// so reporting a missing one would be a failure nobody can fix.
+		if !ProviderNeedsKey(normalizeProvider(provider)) {
+			return DoctorCheck{
+				Label:  "api key",
+				Level:  DoctorOK,
+				Detail: "not required by " + normalizeProvider(provider),
+			}, apiKeySourceMissing, ""
+		}
 		return DoctorCheck{
 			Label:  "api key",
 			Level:  DoctorFail,
-			Detail: "not configured — run `whale setup` or set `DEEPSEEK_API_KEY`",
+			Detail: "not configured — run `whale setup`, or set " + providerEnvName(provider),
 		}, apiKeySourceMissing, ""
 	}
 	switch source {
@@ -26,7 +35,7 @@ func doctorCheckAPIKey(dataDir string) (DoctorCheck, apiKeySource, string) {
 		return DoctorCheck{
 			Label:  "api key",
 			Level:  DoctorOK,
-			Detail: fmt.Sprintf("set via env DEEPSEEK_API_KEY (%s)", tailKey(key)),
+			Detail: fmt.Sprintf("set via env %s (%s)", providerEnvName(provider), tailKey(key)),
 		}, source, key
 	case apiKeySourceCredentials:
 		return DoctorCheck{
@@ -38,7 +47,7 @@ func doctorCheckAPIKey(dataDir string) (DoctorCheck, apiKeySource, string) {
 		return DoctorCheck{
 			Label:  "api key",
 			Level:  DoctorFail,
-			Detail: "not configured — run `whale setup` or set `DEEPSEEK_API_KEY`",
+			Detail: "not configured — set " + providerEnvName(provider),
 		}, apiKeySourceMissing, ""
 	}
 }

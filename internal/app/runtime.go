@@ -81,6 +81,7 @@ func (a *App) ensureAgent() (*agent.Agent, error) {
 			pluginBlocks = a.pluginManager.StartupBlocks(a.ctx)
 		}
 		provider, err := newDeepSeekProvider(providerOptions{
+			Provider:                 a.cfg.Provider,
 			APIKey:                   a.apiKey,
 			BaseURL:                  a.cfg.APIBaseURL,
 			Model:                    a.model,

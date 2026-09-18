@@ -55,8 +55,6 @@ func run(args []string) error {
 		return env.runGo("go", "test", "./...")
 	case "test-tui":
 		return env.runGo("go", "test", "./internal/tui", "./internal/tui/render")
-	case "test-evals":
-		return env.runGo("go", "test", "./internal/evals")
 	case "test-windows":
 		return env.testWindows()
 	case "run":
@@ -117,7 +115,6 @@ Commands:
   vet           Run go vet ./...
   test          Run all offline Go tests
   test-tui      Run the TUI-focused test subset
-  test-evals    Run the eval-focused test subset
   test-windows  Run the supported Windows CI test subset
   run           Build and run Whale
   clean         Remove build output and repo-local Go cache

@@ -1,19 +1,19 @@
 # Hooks
 
-Hooks 让你在 Whale 的关键生命周期点运行自己的脚本。常见用途包括：启动会话时写入团队上下文、工具执行前做策略检查、工具执行后做日志记录、用户提交 prompt 时做格式检查，或在 Whale 结束本轮回复前补充检查。
+Hooks let you run your own scripts at important points in Whale's lifecycle. Common uses include adding team context when a session starts, checking a tool call before it runs, logging tool results, validating a user prompt, or asking Whale to continue before it ends a turn.
 
-Hooks 是 shell 命令。Whale 会把当前事件的 JSON payload 写到命令的 stdin，命令可以什么都不输出，也可以在 stdout 返回 JSON 来影响后续行为。
+Hooks are shell commands. Whale writes the current event payload as JSON to the command's stdin. The command can print nothing, or it can print JSON on stdout to influence what Whale does next.
 
-## 放在哪里
+## Where to Put Hooks
 
-项目级 hooks 写在仓库的 `.whale/config.toml`：
+Project hooks go in `.whale/config.toml`:
 
 ```toml
 [[hooks.SessionStart]]
 command = "printf 'Whale session started\n' >> .whale/hooks.log"
 ```
 
-个人 hooks 可以写在 `.whale/config.local.toml`，不要提交：
+Personal hooks can go in `.whale/config.local.toml`. Do not commit that file:
 
 ```toml
 [[hooks.UserPromptSubmit]]
@@ -21,11 +21,11 @@ command = "python3 .whale/hooks/check_prompt.py"
 timeout = 10
 ```
 
-全局 hooks 可以写在 `~/.whale/config.toml`，会应用到所有项目。
+Global hooks can go in `~/.whale/config.toml` and apply to every project.
 
-## 最小可用例子
+## Smallest Useful Example
 
-这个 hook 会在 `shell_run` 工具执行前运行：
+This hook runs before the `shell_run` tool executes:
 
 ```toml
 [[hooks.PreToolUse]]
@@ -34,28 +34,28 @@ command = "python3 .whale/hooks/check_shell.py"
 timeout = 600
 ```
 
-`timeout` 的单位是秒，默认值是 `600`。如果 hook 超时，Whale 会记录 `decision:timeout`。对于 `PreToolUse`、`PermissionRequest` 和 `UserPromptSubmit`，超时会阻止后续动作。
+`timeout` is in seconds and defaults to `600`. If a hook times out, Whale records `decision:timeout`. For `PreToolUse`, `PermissionRequest`, and `UserPromptSubmit`, a timeout blocks the next action.
 
-## 事件
+## Events
 
-| 事件 | 什么时候运行 | 常见用途 |
+| Event | When it runs | Common use |
 |---|---|---|
-| `SessionStart` | 新会话开始时 | 注入项目说明、检查环境 |
-| `UserPromptSubmit` | 用户提交 prompt 时 | 检查输入、阻止危险请求、改写 prompt |
-| `PreToolUse` | 工具执行前 | 审核 shell 命令、阻止危险工具调用 |
-| `PermissionRequest` | Whale 请求权限时 | 自动允许或拒绝特定权限请求 |
-| `PostToolUse` | 工具执行后 | 记录日志、把工具结果转换为反馈 |
-| `PreCompact` | 上下文压缩前 | 补充需要保留的摘要信息 |
-| `PostCompact` | 上下文压缩后 | 记录 compact 结果 |
-| `SubagentStart` | 子 agent 创建时 | 写入子 agent 专用上下文 |
-| `SubagentStop` | 子 agent 结束前 | 检查子 agent 输出 |
-| `Stop` | Whale 结束本轮回复前 | 做最终检查、要求继续处理 |
+| `SessionStart` | When a new session starts | Add project notes, check setup |
+| `UserPromptSubmit` | When the user submits a prompt | Validate input, block risky requests, rewrite prompts |
+| `PreToolUse` | Before a tool runs | Review shell commands, block risky tool calls |
+| `PermissionRequest` | When Whale asks for permission | Allow or deny specific permission requests |
+| `PostToolUse` | After a tool runs | Log results, turn tool output into feedback |
+| `PreCompact` | Before context compaction | Add details that must survive compaction |
+| `PostCompact` | After context compaction | Record compaction results |
+| `SubagentStart` | When a subagent starts | Add subagent-specific context |
+| `SubagentStop` | Before a subagent ends | Check subagent output |
+| `Stop` | Before Whale ends its turn | Run a final check or ask Whale to continue |
 
-只有 `PreToolUse` 和 `PostToolUse` 使用 `match` 按工具名匹配。`match` 是正则表达式；省略或设为 `*` 表示匹配全部工具。
+Only `PreToolUse` and `PostToolUse` use `match` to filter by tool name. `match` is a regular expression. Omit it or set it to `*` to match every tool.
 
-## 输入
+## Input
 
-Whale 会把事件 payload 作为一行 JSON 写入 stdin。脚本可以从 stdin 读取需要的信息：
+Whale writes the event payload to stdin as one JSON line. Your script can read the fields it needs:
 
 ```sh
 #!/usr/bin/env sh
@@ -63,24 +63,24 @@ payload="$(cat)"
 printf '%s\n' "$payload" >> .whale/hook-input.log
 ```
 
-常用字段包括：
+Useful fields include:
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `event` | 当前 hook 事件名 |
-| `cwd` | 当前工作目录 |
-| `session_id` | 会话 ID |
-| `tool_name` | 工具名，例如 `shell_run` |
-| `tool_args` | 工具参数 |
-| `tool_result` | 工具结果，仅部分后置事件有 |
-| `prompt` | 用户提交的 prompt |
-| `last_assistant_text` | Whale 本轮最后生成的文本 |
+| `event` | Current hook event |
+| `cwd` | Current working directory |
+| `session_id` | Session ID |
+| `tool_name` | Tool name, such as `shell_run` |
+| `tool_args` | Tool arguments |
+| `tool_result` | Tool result, available on some after-events |
+| `prompt` | User prompt |
+| `last_assistant_text` | Whale's latest generated text |
 
-字段会随事件变化。第一次接入时，建议先把 stdin 写到临时日志里，看清楚实际 payload，再写策略。
+Fields vary by event. When integrating a new hook, start by logging stdin to a temporary file so you can see the real payload before writing policy logic.
 
-## 输出
+## Output
 
-如果脚本退出码为 `0` 且 stdout 是 JSON，Whale 会读取这些字段：
+If the script exits with code `0` and stdout is JSON, Whale reads these fields:
 
 ```json
 {
@@ -91,39 +91,39 @@ printf '%s\n' "$payload" >> .whale/hook-input.log
 }
 ```
 
-| 字段 | 用途 |
+| Field | Purpose |
 |---|---|
-| `decision` | `pass`、`warn`、`block`、`halt`、`error` |
-| `reason` / `message` | 展示给用户或传回模型的说明 |
-| `updated_input` | 改写工具参数或用户 prompt |
-| `additional_context` | 给模型补充上下文 |
-| `metadata` | 自定义结构化信息 |
+| `decision` | `pass`, `warn`, `block`, `halt`, or `error` |
+| `reason` / `message` | Explanation shown to the user or passed back to the model |
+| `updated_input` | Rewrite tool arguments or the user prompt |
+| `additional_context` | Add context for the model |
+| `metadata` | Custom structured data |
 
-对于 `PreToolUse`、`PermissionRequest` 和 `UserPromptSubmit`，`decision = "block"` 会阻止后续动作。其他事件返回 `block` 会降级为 warning，不会直接挡住主流程。
+For `PreToolUse`, `PermissionRequest`, and `UserPromptSubmit`, `decision = "block"` blocks the next action. On other events, `block` is downgraded to a warning and does not stop the main flow.
 
-## 退出码
+## Exit Codes
 
-| 退出码 | 行为 |
+| Exit code | Behavior |
 |---|---|
-| `0` | 成功；如果 stdout 是 JSON，Whale 会解析输出 |
-| `2` | 对 blocking 事件表示阻止；stderr 会作为原因 |
-| 其他非零 | 记录为 warning 或 error，取决于事件 |
+| `0` | Success; Whale parses stdout if it is JSON |
+| `2` | Blocks blocking events; stderr is used as the reason |
+| Other non-zero | Recorded as a warning or error, depending on the event |
 
-即使 stdout 里有 `"decision":"pass"`，只要进程超时或启动失败，Whale 不会让这个输出覆盖真实失败。
+Even if stdout contains `"decision":"pass"`, Whale will not let partial output override a timeout or process-start failure.
 
-## 信任与启停
+## Trust and Enablement
 
-共享项目配置 `.whale/config.toml` 里的 hooks 会执行 shell 命令，所以 Whale 会把它们当作需要 review 的内容。未信任或已修改的共享项目 hooks 不会运行。
+Shared project hooks in `.whale/config.toml` run shell commands, so Whale treats them as reviewable. Untrusted or modified shared project hooks do not run.
 
-个人配置 `.whale/config.local.toml` 和全局配置 `~/.whale/config.toml` / `$WHALE_HOME/config.toml` 默认视为用户本人信任的配置，会直接生效；仍然可以用 `/hooks disable <key>` 临时关闭。
+Personal hooks in `.whale/config.local.toml` and global hooks in `~/.whale/config.toml` / `$WHALE_HOME/config.toml` are treated as user-trusted config and are active by default. You can still disable them with `/hooks disable <key>`.
 
-在 TUI 中运行：
+In the TUI, run:
 
 ```text
 /hooks
 ```
 
-你可以查看所有 hooks、哪些正在生效、哪些需要 review。常用命令：
+You can inspect all hooks, see which ones are active, and review changed hooks. Common commands:
 
 ```text
 /hooks trust all
@@ -132,12 +132,12 @@ printf '%s\n' "$payload" >> .whale/hook-input.log
 /hooks enable <key>
 ```
 
-建议团队把共享 hooks 放在 `.whale/config.toml`，个人实验放在 `.whale/config.local.toml`。
+Put shared team hooks in `.whale/config.toml`. Put personal experiments in `.whale/config.local.toml`.
 
-## 接入建议
+## Integration Advice
 
-先从只记录日志的 hook 开始，确认事件触发点和 payload。再加入 `decision:block` 这类会改变主流程的逻辑。
+Start with a logging-only hook to confirm the trigger point and payload. Add `decision:block` only after the basic path is predictable.
 
-不要在 hook 中写无限等待、长时间网络请求或交互式命令。需要外部服务时，给 hook 设置明确的 `timeout`，并让脚本失败时输出清楚的 stderr。
+Do not run infinite waits, long network calls, or interactive commands inside hooks. If a hook calls an external service, set an explicit `timeout` and make failures write clear stderr.
 
-不要把 API key、token 或个人路径提交到 `.whale/config.toml`。需要秘密值时用环境变量，或放到不提交的 `.whale/config.local.toml`。
+Do not commit API keys, tokens, or personal paths in `.whale/config.toml`. Use environment variables, or put personal values in `.whale/config.local.toml`.

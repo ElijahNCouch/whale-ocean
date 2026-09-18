@@ -1,49 +1,49 @@
-# 自定义 Workflow
+# Custom Workflows
 
-本指南介绍如何编写、调试和分享自定义 workflow 脚本。
+This guide shows how to write, debug, and share custom workflow scripts.
 
-> **Claude Code 兼容**
+> **Claude Code Compatible**
 >
-> Whale 的 workflow 脚本格式与 **Claude Code raw script 完全兼容**。
-> 以下所有 API（`agent`、`parallel`、`pipeline`、`phase`、`log`、`budget`、`args`）
-> 与 Claude Code 的全局函数一致。为 Claude Code 编写的 workflow 脚本
-> 可以直接复制到 `.whale/workflows/`（项目级）
-> 或 `~/.whale/workflows/`（全局）下运行。
+> Whale's workflow script format is **fully compatible with Claude Code raw scripts**.
+> All of the following APIs (`agent`, `parallel`, `pipeline`, `phase`, `log`, `budget`, `args`)
+> match Claude Code's global functions exactly. Workflow scripts written for
+> Claude Code can be copied to `.whale/workflows/` (project-level)
+> or `~/.whale/workflows/` (user-global) and run as-is.
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 1. 创建 workflow 文件
+### 1. Create a workflow file
 
-Workflows 可以放在两个位置：
+Workflows can be placed in two locations:
 
-- **项目级**（推荐，可版本控制）：`.whale/workflows/<name>.js`
-- **全局**（个人所有项目可用）：`~/.whale/workflows/<name>.js`
+- **Project-level** (recommended, version-controlled): `.whale/workflows/<name>.js`
+- **User-global** (available across all projects): `~/.whale/workflows/<name>.js`
 
-例如，创建一个项目级 workflow：
+For example, create a project-level workflow:
 
 ```
 .whale/workflows/my-workflow.js
 ```
 
-### 2. 写入基础结构
+### 2. Write the basic structure
 
 ```javascript
 export const meta = {
   name: "my-workflow",
-  description: "一句话描述这个 workflow 的用途",
+  description: "One-line description of what this workflow does",
   phases: [
-    { title: "收集", detail: "收集需要的信息" },
-    { title: "分析", detail: "分析结果并生成报告" },
+    { title: "Collect", detail: "Gather information" },
+    { title: "Analyze", detail: "Analyze results and generate a report" },
   ],
 };
 
 export default async function main(args) {
-  const input = args || "默认输入";
+  const input = args || "default input";
 
-  phase("收集");
-  const data = await agent(`收集关于 ${input} 的信息`, {
+  phase("Collect");
+  const data = await agent(`Gather information about ${input}`, {
     label: "collector",
     schema: {
       type: "object",
@@ -54,62 +54,64 @@ export default async function main(args) {
     },
   });
 
-  phase("分析");
-  const report = await agent(`基于这些发现生成报告: ${JSON.stringify(data)}`, {
-    label: "analyst",
-  });
+  phase("Analyze");
+  const report = await agent(
+    `Generate a report based on these findings: ${JSON.stringify(data)}`,
+    { label: "analyst" },
+  );
 
   return report;
 }
 ```
 
-### 3. 命名规则
+### 3. Naming rules
 
-- 文件名必须为 **kebab-case**（如 `my-workflow.js`）
-- `meta.name` 必须与文件名一致（不含 `.js`）
-- 名称只能包含小写字母、数字和连字符
+- Filename must be **kebab-case** (e.g., `my-workflow.js`)
+- `meta.name` must match the filename (without `.js`)
+- Names may only contain lowercase letters, digits, and hyphens
 
-### 4. 使用
+### 4. Using it
 
-在对话中描述你的需求，或者直接说"跑一下 my-workflow"，
-Whale 会自动识别并调用该 workflow。
+Describe what you need in the conversation, or say "run my-workflow" —
+Whale will auto-detect and invoke the workflow by name.
 
 ---
 
-## 全局 API 参考
+## Global API Reference
 
 ### `agent(prompt, opts?)`
 
-启动一个子 agent。
+Spawns a sub-agent.
 
-如果你只是想定义一个可复用的 reviewer、researcher 或 architect 角色，先看
-[自定义 Subagent](agents.md)。Workflow 适合把多个 subagent 调用编排成固定流程。
+If you only want to define a reusable reviewer, researcher, or architect role,
+start with [Custom Subagents](agents.md). Workflows are for orchestrating
+multiple subagent calls into a fixed process.
 
 ```javascript
-const result = await agent("分析这段代码", {
-  label: "code-reviewer",        // 面板中显示的名字
-  phase: "审查",                 // 覆盖当前 phase
-  model: "deepseek-chat",        // 可选，指定模型
-  schema: { /* JSON Schema */ }, // 约束结构化输出
-  capabilities: [],              // 可选，限制工具权限
-  max_tool_iters: 10,            // 最大工具调用轮次
-  max_tool_calls: 20,            // 最大工具调用次数
+const result = await agent("Review this code", {
+  label: "code-reviewer",         // Display name in the panel
+  phase: "Review",                // Override the current phase
+  model: "deepseek-chat",         // Optional, specify a model
+  schema: { /* JSON Schema */ },  // Constrain structured output
+  capabilities: [],               // Optional, restrict tool access
+  max_tool_iters: 10,             // Max tool-call rounds
+  max_tool_calls: 20,             // Max total tool calls
 });
 ```
 
-也可以复用 `.whale/agents` 中的自定义角色：
+You can also reuse a custom role from `.whale/agents`:
 
 ```javascript
-const review = await agent("审查当前改动", {
+const review = await agent("Review the current changes", {
   agent: { name: "reviewer" },
   label: "reviewer",
 });
 ```
 
-#### 使用 JSON Schema 约束输出
+#### Using JSON Schema for structured output
 
 ```javascript
-const result = await agent("列出 3 个改进建议", {
+const result = await agent("List 3 improvement suggestions", {
   schema: {
     type: "object",
     required: ["suggestions"],
@@ -129,109 +131,109 @@ const result = await agent("列出 3 个改进建议", {
     },
   },
 });
-// result.suggestions 是带类型约束的数组
+// result.suggestions is a typed array
 ```
 
 ### `parallel(thunks)`
 
-并发执行多个 agent，等待所有完成。
+Runs multiple agents concurrently and waits for all to finish.
 
 ```javascript
 const [resultA, resultB] = await parallel([
-  () => agent("分析方案 A", { label: "analysis-a" }),
-  () => agent("分析方案 B", { label: "analysis-b" }),
+  () => agent("Analyze option A", { label: "analysis-a" }),
+  () => agent("Analyze option B", { label: "analysis-b" }),
 ]);
 ```
 
-**注意：** thunk 必须是 `() => agent(...)` 箭头函数，不能直接传 `agent(...)` 返回的 promise。
+**Note:** thunks must be `() => agent(...)` arrow functions, not `agent(...)` promises directly.
 
 ### `pipeline(items, ...stages)`
 
-流式处理：每项独立经过各阶段，无 barrier。
+Streams each item through a series of stages independently, with no barrier.
 
 ```javascript
 const results = await pipeline(
   items,
-  (item) => agent(`审查: ${item}`),
-  (review) => agent(`打分: ${review}`),
+  (item) => agent(`Review: ${item}`),
+  (review) => agent(`Score: ${review}`),
 );
 ```
 
-`pipeline()` 适合"每项独立处理"的场景；
-`parallel()` 适合"需要全部结果才能进行下一步"的场景。
+`pipeline()` suits "process each item independently" scenarios;
+`parallel()` suits "need all results before proceeding" scenarios.
 
 ### `workflow(name, args?)`
 
-调用另一个 workflow（最多嵌套一层）。
+Calls another workflow (limited to one level of nesting).
 
 ```javascript
-const deepResult = await workflow("deep-research", "量子计算的现状");
+const deepResult = await workflow("deep-research", "Current state of quantum computing");
 ```
 
 ### `phase(title)`
 
-标记当前阶段，UI 面板会显示进度。
+Marks the current phase — the panel shows progress accordingly.
 
 ```javascript
-phase("数据收集");
+phase("Data Collection");
 // ... agents ...
-phase("数据分析");
+phase("Data Analysis");
 // ... agents ...
 ```
 
 ### `log(message)`
 
-在面板中输出日志信息。
+Emits a log line visible in the panel.
 
 ```javascript
-log(`已处理 ${count} 条记录`);
+log(`Processed ${count} records`);
 ```
 
 ### `budget`
 
-控制 token 预算。
+Controls the token budget.
 
 ```javascript
 if (budget.remaining() < 5000) {
-  log("预算不足，跳过详细分析");
+  log("Budget low, skipping detailed analysis");
   return fallbackResult;
 }
 ```
 
-- `budget.total` — 总预算（未设置则为 `null`）
-- `budget.spent()` — 已消耗 tokens
-- `budget.remaining()` — 剩余 tokens
+- `budget.total` — Total budget (`null` if not set)
+- `budget.spent()` — Tokens consumed so far
+- `budget.remaining()` — Tokens remaining
 
 ### `args`
 
-从调用时传入的只读参数。
+Read-only arguments passed in when the workflow was invoked.
 
 ```javascript
 export default async function main(args) {
-  const topic = args?.topic || "默认主题";
+  const topic = args?.topic || "default topic";
 }
 ```
 
 ---
 
-## 完整示例
+## Complete Examples
 
-### 多视角代码审查
+### Multi-perspective code review
 
 ```javascript
 export const meta = {
   name: "review-code",
-  description: "从多个维度审查代码变更",
+  description: "Review code changes from multiple perspectives",
   phases: [
-    { title: "审查", detail: "并行从 3 个视角审查" },
-    { title: "综合", detail: "汇总审查结果" },
+    { title: "Review", detail: "Parallel review from 3 perspectives" },
+    { title: "Synthesize", detail: "Combine review results" },
   ],
 };
 
 export default async function main(args) {
-  phase("审查");
+  phase("Review");
   const perspectives = await parallel([
-    () => agent("审查这段代码的正确性和边界条件", {
+    () => agent("Review this code for correctness and edge cases", {
       label: "correctness",
       schema: {
         type: "object",
@@ -241,7 +243,7 @@ export default async function main(args) {
         },
       },
     }),
-    () => agent("审查这段代码的安全隐患", {
+    () => agent("Review this code for security vulnerabilities", {
       label: "security",
       schema: {
         type: "object",
@@ -251,7 +253,7 @@ export default async function main(args) {
         },
       },
     }),
-    () => agent("审查这段代码的性能和可维护性", {
+    () => agent("Review this code for performance and maintainability", {
       label: "performance",
       schema: {
         type: "object",
@@ -263,9 +265,9 @@ export default async function main(args) {
     }),
   ]);
 
-  phase("综合");
+  phase("Synthesize");
   const summary = await agent(
-    `综合以下审查结果，给出最终建议：\n${JSON.stringify(perspectives)}`,
+    `Synthesize the following review results into final recommendations:\n${JSON.stringify(perspectives)}`,
     { label: "synthesizer" },
   );
 
@@ -273,24 +275,24 @@ export default async function main(args) {
 }
 ```
 
-### 循环直到枯竭（Loop-until-dry）
+### Loop-until-dry
 
 ```javascript
 export const meta = {
   name: "find-all-issues",
-  description: "持续发现代码问题直到枯竭",
-  phases: [{ title: "扫描", detail: "多轮扫描未引用代码" }],
+  description: "Keep discovering issues until no new ones surface",
+  phases: [{ title: "Scan", detail: "Multi-round scan for unreferenced code" }],
 };
 
 export default async function main(args) {
-  phase("扫描");
+  phase("Scan");
   const allIssues = [];
   let emptyRounds = 0;
   const MAX_EMPTY_ROUNDS = 2;
 
   for (let round = 1; round <= 10; round++) {
     const result = await agent(
-      `找出未引用的符号（已知已发现的：${allIssues.join(", ")}）`,
+      `Find unreferenced symbols (already found: ${allIssues.join(", ")})`,
       { label: `round-${round}` },
     );
     if (!result || !result.length) {
@@ -308,27 +310,27 @@ export default async function main(args) {
 
 ---
 
-## Claude Code 兼容性对照
+## Claude Code Compatibility
 
-| 差异点 | Claude Code | Whale |
+| Difference | Claude Code | Whale |
 |---|---|---|
-| 脚本格式 | raw script（`export const meta`） | 完全一致 |
-| 全局 API | `agent` / `parallel` / `pipeline` / `workflow` / `phase` / `log` / `budget` / `args` | 完全一致 |
-| `agent()` options | `schema` / `label` / `phase` / `model` / `capabilities` / `max_tool_iters` / `max_tool_calls` | 完全一致 |
-| 项目级路径 | `.claude/workflows/` | `.whale/workflows/` |
-| 全局路径 | `~/.claude/workflows/` | `~/.whale/workflows/` |
-| 高级特性 | — | resume、budget 控制 |
+| Script format | raw script (`export const meta`) | Identical |
+| Global API | `agent` / `parallel` / `pipeline` / `workflow` / `phase` / `log` / `budget` / `args` | Identical |
+| `agent()` options | `schema` / `label` / `phase` / `model` / `capabilities` / `max_tool_iters` / `max_tool_calls` | Identical |
+| Project-level path | `.claude/workflows/` | `.whale/workflows/` |
+| User-global path | `~/.claude/workflows/` | `~/.whale/workflows/` |
+| Advanced features | — | resume, budget control |
 
-**迁移方法：** 直接把 `.claude/workflows/<name>.js` 复制到 `.whale/workflows/<name>.js` 即可运行。
+**Migration:** Simply copy `.claude/workflows/<name>.js` to `.whale/workflows/<name>.js` and it works.
 
 ---
 
-## 排错
+## Troubleshooting
 
-| 问题 | 原因 | 解决 |
+| Problem | Cause | Fix |
 |---|---|---|
-| `script must begin with export const meta` | 脚本开头格式不对 | 确保第一行非注释代码是 `export const meta = { ... }` |
-| `invalid workflow filename` | 文件名不是 kebab-case | 用 `my-workflow.js` ✅，不要用 `MyWorkflow.js` ❌ |
-| `filename must match meta.name` | 文件名与 `meta.name` 不一致 | 保持 `my-workflow.js` ⇔ `name: "my-workflow"` |
-| `agent call limit exceeded` | 超 workflow 最大 agent 调用数 | 增加 budget 或减少 agent 数量 |
-| `workflow() cannot be called from within` | workflow 嵌套超过 1 层 | 只能主 workflow 调子 workflow，不能子调子 |
+| `script must begin with export const meta` | Wrong script header | First non-comment line must be `export const meta = { ... }` |
+| `invalid workflow filename` | Not kebab-case | Use `my-workflow.js` ✅, not `MyWorkflow.js` ❌ |
+| `filename must match meta.name` | File name vs meta.name mismatch | Keep `my-workflow.js` ⇔ `name: "my-workflow"` |
+| `agent call limit exceeded` | Over the workflow's max agent calls | Increase budget or reduce agents |
+| `workflow() cannot be called from within` | Nesting > 1 level | Only the main workflow can call sub-workflows |

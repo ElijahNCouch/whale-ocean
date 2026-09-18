@@ -65,7 +65,7 @@ func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string, opts ...Do
 		order = defaults.DefaultMemoryFileOrder()
 	}
 
-	apiKeyCheck, source, key := doctorCheckAPIKey(dataDir)
+	apiKeyCheck, source, key := doctorCheckAPIKey(dataDir, cfg.Provider)
 	credsCheck := doctorCheckCredentials(dataDir)
 	loadedConfig, configErr := LoadConfigFiles(dataDir, workspaceRoot)
 	configCheck := doctorCheckConfig(loadedConfig, configErr)

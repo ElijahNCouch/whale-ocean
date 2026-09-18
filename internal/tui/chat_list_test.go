@@ -9,6 +9,7 @@ import (
 	"github.com/muesli/termenv"
 
 	tuirender "github.com/usewhale/whale/internal/tui/render"
+	tuitheme "github.com/usewhale/whale/internal/tui/theme"
 )
 
 func TestRenderChatItemLinesPreservesStyledUserPromptPadding(t *testing.T) {
@@ -27,7 +28,11 @@ func TestRenderChatItemLinesPreservesStyledUserPromptPadding(t *testing.T) {
 	if strings.TrimSpace(xansi.Strip(lines[0])) != "" || strings.TrimSpace(xansi.Strip(lines[len(lines)-1])) != "" {
 		t.Fatalf("expected first and last item lines to be padding, got: %q", strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[0], "\x1b[48;5;236m") || !strings.Contains(lines[len(lines)-1], "\x1b[48;5;236m") {
+	padding := lipgloss.NewStyle().Background(tuitheme.Default.UserBackground).Render("x")
+	if i := strings.Index(padding, "m"); i > 0 {
+		padding = padding[:i+1]
+	}
+	if !strings.Contains(lines[0], padding) || !strings.Contains(lines[len(lines)-1], padding) {
 		t.Fatalf("expected styled padding to survive item trimming, got: %q", strings.Join(lines, "\n"))
 	}
 }

@@ -1,179 +1,116 @@
 # Whale
 
 <p align="center">
-  <img src="docs/logo.svg" alt="Whale — AI coding agent for DeepSeek, in any environment" width="640">
+  <img src="docs/logo.svg" alt="Whale — an AI coding agent for your terminal" width="640">
 </p>
 
 <p align="center">
-  <a href="./README.zh.md">简体中文</a> · <strong>English</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/usewhale/Whale/releases"><img src="https://img.shields.io/github/v/release/usewhale/Whale?label=release" alt="release"></a>
-  <a href="https://www.npmjs.com/package/@usewhale/whale"><img src="https://img.shields.io/npm/v/@usewhale/whale" alt="npm"></a>
-  <a href="https://github.com/usewhale/Whale/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/usewhale/Whale/ci.yml?label=CI" alt="CI"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/usewhale/Whale" alt="license"></a>
-  <a href="https://github.com/usewhale/Whale/stargazers"><img src="https://img.shields.io/github/stars/usewhale/Whale?style=flat&logo=github&label=stars" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/prompt%20cache-98%25-brightgreen" alt="98% prompt cache hit">
-</p>
-
-<p align="center">
-  Blazingly fast · ~98% prompt cache hit · Zero bloat
-</p>
-
-<p align="center">
-  <b>Whale — AI coding agent for DeepSeek, in any environment.</b><br>
-  Long context, tools, and programmable workflows —<br>
-  start in the terminal, scale to desktop and beyond.
+  An AI coding agent for your terminal.<br>
+  Free to start, runs on any model, and gets its competence from tools.
 </p>
 
 ---
 
-## 🚀 Quick Start
-
-Any platform:
+## Quick start
 
 ```bash
-npm install -g @usewhale/whale
+npm install -g @usewhale/whale     # or: brew install usewhale/tap/whale
+whale setup                        # pick a provider — the free ones are listed first
+whale                              # start a session
 ```
 
-macOS:
+`whale setup` shows which providers cost nothing, marks the ones already usable
+on this machine, and opens the page where a key is created. The default is
+Google Gemini's free tier, which needs no card, on the lite model — free quotas
+are counted in requests per day, and an agent spends several per turn. If an
+Ollama server is already running locally, Whale uses that instead and asks for
+nothing at all.
 
-```bash
-brew install usewhale/tap/whale
-```
+Nothing configured, no keys anywhere? Whale still starts, and tells you what it
+needs.
 
-Linux:
+## Free by default
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/Whale/main/scripts/install.sh | sh
-```
-
-Windows PowerShell:
-
-Requires Windows 10 or Windows Server 2016 or later.
-
-```powershell
-irm https://raw.githubusercontent.com/usewhale/Whale/main/scripts/install.ps1 | iex
-```
-
-Windows CMD:
-
-```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/usewhale/Whale/main/scripts/install.ps1 | iex"
-```
-
-```bash
-# Set your DeepSeek API key
-whale setup
-
-# Launch the interactive TUI
-whale
-```
-
-That's it. Type your question and Whale starts working — reading files, running commands,
-editing code, searching the web.
-
-> Need a different model provider, proxy, or custom config? See [Configuration](docs/configuration.en.md).
-
----
-
-## ✨ At a Glance
-
-| What | Why it matters |
-|---|---|
-| 💰 **~98% prompt cache hit** | Whale reuses cached context aggressively — most prompts hit cache, slashing costs to pennies per session. DeepSeek pricing × Whale caching = AI-assisted coding at scale. |
-| 🐋 **DeepSeek-native** | Built for DeepSeek's long context (1M tokens), tool calling, and cost efficiency — no generic multi-model wrapper |
-| 🔁 **Dynamic Workflows** | Write JavaScript scripts that orchestrate multiple agents — fan-out research, multi-perspective review, pipelines. Claude Code compatible. |
-| 🔌 **MCP** | Plug in 1,000+ MCP servers for extended tooling — file ops, shell, git, web, and more |
-| 🧩 **Skills + Plugins** | Install community skills (code review, git workflows, etc.) or write your own |
-
----
-
-## 🔁 Dynamic Workflows
-
-Whale's **Dynamic Workflows** let you script multi-agent orchestration in JavaScript:
-
-```js
-// .whale/workflows/research.js
-const results = await parallel([
-  () => agent("Search for best practices in Go error handling"),
-  () => agent("Find common Go error handling mistakes"),
-]);
-return agent("Synthesize both findings into a concise guide");
-```
-
-**Fan-out research · Multi-perspective review · Pipeline processing · Adversarial validation**
-
-> ✅ **Claude Code compatible** — workflow scripts written for Claude Code work as-is in Whale.
-
-> **⚠️ Disabled by default** — run `/config` in the TUI and enable `Dynamic workflows`, or add `[workflows] enabled = true` to `.whale/config.local.toml`.
-
-Learn more: [Workflow Overview](docs/workflows.en.md) · [Custom Workflow Guide](docs/custom-workflows.en.md)
-
----
-
-## 🧰 MCP, Skills & Plugins
-
-| Extension | What it does | Get started |
+| Provider | Key | Notes |
 |---|---|---|
-| **MCP Servers** | Connect to 1,000+ tools (databases, APIs, browser automation) | [docs/mcp.en.md](docs/mcp.en.md) |
-| **Skills** | Load domain expertise — code review, git-worktree, and more | [docs/skills.en.md](docs/skills.en.md) |
-| **Subagents** | Define focused child-agent roles such as reviewers or researchers | [docs/agents.en.md](docs/agents.en.md) |
-| **Plugins** | Extend Whale's runtime with custom logic | [docs/plugins.en.md](docs/plugins.en.md) |
-| **Hooks** | Run scripts on lifecycle events | [docs/hooks.en.md](docs/hooks.en.md) |
+| **Google Gemini** | free tier | The default. No card. |
+| **Ollama** | none | Local. Offline. Auto-detected. |
+| **Groq** | free tier | Very fast. |
+| **OpenRouter** | free tier | One key, many `:free` models. |
+| **Cerebras** | free tier | Very fast. |
 
----
+DeepSeek, GitHub Copilot and any other OpenAI-compatible endpoint work the same
+way. Keys for several providers can be stored at once, and the one you
+configured is never silently swapped. See [Providers](docs/providers.md).
 
-## 📸 How It Works
+## Tools instead of knowledge
 
-Whale currently offers three interfaces — with more environments on the way:
+A small free model is worse than a large paid one at *recalling* things: the
+exact `kubectl` flags, which `git` incantation shows what you meant, where a
+crash loop leaves its reason. It is much better at *choosing* from a list.
 
-| Interface | When to use |
+So Whale gives it a list. Alongside the usual file, search, shell and web
+tools, it offers each operational enquiry as its own named tool:
+
+| | |
 |---|---|
-| **`whale`** (TUI) | Interactive coding sessions — chat, review, iterate with full context |
-| **`whale ask "..."`** (CLI) | One-shot questions, quick code reviews, single commands |
-| **`whale --headless`** | CI/CD, automated PR reviews, scheduled tasks |
+| `env_info` | OS, architecture, and which CLIs exist here, with versions |
+| `git_status` `git_log` `git_diff` | repository state, history, changes |
+| `docker_ps` `docker_logs` | containers and their output |
+| `k8s_get` `k8s_describe` `k8s_logs` `k8s_context` | cluster state, and why a pod will not start |
+| `terraform_plan` | what would change, without changing it |
+| `gh_run_list` | recent CI runs |
+| `systemd_status` | unit state with recent logs |
+| `port_check` `dns_lookup` | is it down, or unreachable, or just wrong? |
 
----
+Three rules keep this honest:
 
-## 🎯 Non-goals
+- **Every one of them only reads.** No operational tool here can be the reason
+  an incident got worse.
+- **A tool only appears when the binary behind it exists.** The catalogue a
+  model sees describes what this machine can actually do, rather than a wish
+  list it will hallucinate its way through. `env_info` is the exception — it
+  always exists, because it is what reports the rest.
+- **Arguments are passed as argv, never through a shell.** A value containing a
+  semicolon is a value.
 
-- **Multi-model shell.** Whale is DeepSeek-first — optimized for DeepSeek's caching, tools, and pricing.
-- **IDE replacement.** Whale is not an IDE — it's an agent that meets you wherever you code: terminal, desktop, or CI.
+A capable model does not need any of this and will reach for `shell_run`. A
+weaker one stops guessing flags and starts picking tools, which is most of the
+difference between the two.
 
-## 📦 Project Status
+## What else it does
 
-Whale is in active development. Best suited for personal projects, experimental repositories,
-and workflows where changes can be reviewed and rolled back.
+| | | |
+|---|---|---|
+| **MCP servers** | Connect external tool servers | [docs/mcp.md](docs/mcp.md) |
+| **Skills** | Load domain expertise on demand | [docs/skills.md](docs/skills.md) |
+| **Subagents** | Focused child-agent roles | [docs/agents.md](docs/agents.md) |
+| **Workflows** | Script multi-agent orchestration in JavaScript | [docs/workflows.md](docs/workflows.md) |
+| **Plugins** | Extend the runtime | [docs/plugins.md](docs/plugins.md) |
+| **Hooks** | Run scripts on lifecycle events | [docs/hooks.md](docs/hooks.md) |
 
-> **Disclaimer:** This project is not affiliated with DeepSeek Inc. It is an independent open-source community project.
+Workflows are off by default; enable `Dynamic workflows` via `/config`, or add
+`[workflows] enabled = true` to `.whale/config.local.toml`.
 
----
+## Interfaces
 
-## 🤝 Contributing
+| | |
+|---|---|
+| `whale` | Interactive terminal session |
+| `whale exec "..."` | One-shot, scriptable, `--json` available |
+| `whale doctor` | What is configured, and what is missing |
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development, testing, issues, and PRs.
+## Configuration
 
-Current direction and available tasks: [ROADMAP.md](ROADMAP.md).
+Config lives in `.whale/config.toml` (project) or `~/.whale/config.toml`
+(global). Keys are stored separately in `credentials.json`, owner-readable
+only. See [Configuration](docs/configuration.md).
 
-Security issues: [SECURITY.md](SECURITY.md).
+## Contributing
 
----
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
 
-## Star History
-
-<a href="https://www.star-history.com/?repos=usewhale%2FWhale&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=usewhale/Whale&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=usewhale/Whale&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=usewhale/Whale&type=date&legend=top-left" />
- </picture>
-</a>
-
----
-
-## 🙏 Credits
+## Credits
 
 Whale stands on the shoulders of giants:
 
@@ -186,3 +123,5 @@ Whale stands on the shoulders of giants:
 - [tetratelabs/wazero](https://github.com/tetratelabs/wazero) — Pure-Go WebAssembly runtime
 
 And the many open-source libraries we depend on — thank you.
+
+> Not affiliated with DeepSeek Inc., Google, or any other model provider.

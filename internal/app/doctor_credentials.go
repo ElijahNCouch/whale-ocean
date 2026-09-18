@@ -5,20 +5,34 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/usewhale/whale/internal/defaults"
 )
 
-func resolveDeepSeekAPIKey(dataDir string) (string, apiKeySource, error) {
-	if v := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")); v != "" {
+func resolveProviderAPIKey(dataDir, provider string) (string, apiKeySource, error) {
+	envName := providerEnvName(provider)
+	if v := strings.TrimSpace(os.Getenv(envName)); v != "" {
 		return v, apiKeySourceEnv, nil
 	}
 	creds, err := LoadCredentials(dataDir)
 	if err != nil {
 		return "", apiKeySourceMissing, err
 	}
-	if v := strings.TrimSpace(creds.DeepSeekAPIKey); v != "" {
+	if v := creds.KeyFor(provider); v != "" {
 		return v, apiKeySourceCredentials, nil
 	}
 	return "", apiKeySourceMissing, nil
+}
+
+func resolveDeepSeekAPIKey(dataDir string) (string, apiKeySource, error) {
+	return resolveProviderAPIKey(dataDir, ProviderDeepSeek)
+}
+
+func providerEnvName(provider string) string {
+	if env := defaults.ProviderKeyEnv(normalizeProvider(provider)); env != "" {
+		return env
+	}
+	return "DEEPSEEK_API_KEY"
 }
 
 func readCredentialsState(dataDir string) fileState {

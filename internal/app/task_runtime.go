@@ -24,9 +24,10 @@ func (a *App) rebuildTaskRuntimeLocked() error {
 	cfg := a.cfg
 	providerFactory := func(model string, maxTokens int) (llm.Provider, error) {
 		if strings.TrimSpace(model) == "" {
-			model = defaults.DefaultModel
+			model = core.FirstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
 		}
 		return newDeepSeekProvider(providerOptions{
+			Provider:                 cfg.Provider,
 			APIKey:                   apiKey,
 			BaseURL:                  cfg.APIBaseURL,
 			Model:                    model,
@@ -45,10 +46,11 @@ func (a *App) rebuildTaskRuntimeLocked() error {
 	providerFactoryWithOptions := func(req tasks.ProviderRequest) (llm.Provider, error) {
 		model := strings.TrimSpace(req.Model)
 		if model == "" {
-			model = defaults.DefaultModel
+			model = core.FirstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
 		}
 		reqEffort := normalizeEffort(core.FirstNonEmpty(strings.TrimSpace(req.Effort), effort))
 		return newDeepSeekProvider(providerOptions{
+			Provider:                 cfg.Provider,
 			APIKey:                   apiKey,
 			BaseURL:                  cfg.APIBaseURL,
 			Model:                    model,
@@ -119,7 +121,7 @@ func (a *App) rebuildTaskRuntimeLocked() error {
 		ExtraSkills:                extraSkills,
 		AutoCompact:                cfg.AutoCompact,
 		AutoCompactThreshold:       cfg.AutoCompactThreshold,
-		DefaultModel:               defaults.DefaultModel,
+		DefaultModel:               core.FirstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel),
 		DefaultMaxTokens:           tasks.DefaultMaxTokens,
 		DefaultMaxToolIters:        tasks.DefaultMaxToolIters,
 		SummaryMaxChars:            tasks.DefaultSummaryMaxChar,

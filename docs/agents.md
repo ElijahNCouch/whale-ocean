@@ -1,43 +1,43 @@
-# 自定义 Subagent
+# Custom Subagents
 
-Subagent 是 Whale 临时启动的子智能体。你可以把它理解成一个有固定角色的小助手：
+A subagent is a child agent that Whale starts for one bounded task. Think of it as a named helper with a focused role:
 
-- `reviewer` 只负责审查代码
-- `researcher` 只负责查资料和引用来源
-- `architect` 只负责看设计和边界
+- `reviewer` reviews code
+- `researcher` gathers source-backed information
+- `architect` checks design boundaries
 
-主会话仍然由 Whale 控制。Subagent 只做一次明确的小任务，完成后把结果交回主会话。
-
----
-
-## 什么时候需要自定义 Subagent
-
-如果你只是想让 Whale 记住一些偏好，先看 [Skills](skills.md)。如果你想把多个步骤固定成脚本，先看 [Workflow](custom-workflows.md)。
-
-适合自定义 subagent 的情况：
-
-- 你经常让 Whale 做同一种角色判断，比如安全审查、API 设计审查、测试策略审查
-- 你希望这个角色默认只读，或者只暴露一小组工具
-- 你希望团队共享同一个 reviewer/architect/researcher 角色
-- 你希望 workflow 里复用同一个角色，而不是每次都写很长的 prompt
-
-不太适合的情况：
-
-- 只是补充项目规则：用 `AGENTS.md` 或 rules/skills 更合适
-- 只是想改主 agent 的语气：用配置里的自定义系统提示词
-- 需要固定多步流程：用 workflow
+The main Whale session still stays in control. A subagent does its task, returns a result, and then the main agent decides what to do next.
 
 ---
 
-## 最小例子：创建一个代码审查 Subagent
+## When to Create One
 
-在项目根目录创建文件：
+If you only want Whale to remember preferences, start with [Skills](skills.md). If you want a fixed multi-step process, start with [Workflows](custom-workflows.md).
+
+Custom subagents are useful when:
+
+- You often ask Whale for the same kind of role-based judgment, such as security review, API design review, or test strategy.
+- You want that role to use only a small set of tools.
+- You want a reviewer, architect, or researcher role shared by the team.
+- You want workflows to reuse a named role instead of repeating a long prompt each time.
+
+They are less useful when:
+
+- You only need project rules. Use `AGENTS.md`, rules, or skills instead.
+- You only want to change the main agent's tone. Use the custom system prompt setting.
+- You need a fixed sequence of steps. Use a workflow.
+
+---
+
+## Minimal Example: A Code Review Subagent
+
+Create this file at the project root:
 
 ```text
 .whale/agents/reviewer.md
 ```
 
-写入：
+Write:
 
 ```markdown
 ---
@@ -54,41 +54,41 @@ Start with findings ordered by severity. Include file and line references when p
 Do not rewrite code unless the main agent explicitly asks you to propose a patch.
 ```
 
-然后重新打开 Whale，或者开始一个新会话。
+Then restart Whale or start a new session.
 
-现在你可以直接说：
+Now you can say:
 
 ```text
-用 reviewer subagent 审查当前改动
+Use the reviewer subagent to review my current changes.
 ```
 
-Whale 会把 `reviewer` 当作一个可用的子智能体角色。需要时，主 agent 会通过 `spawn_subagent` 启动它。
+Whale can now treat `reviewer` as an available subagent role. When appropriate, the main agent starts it with `spawn_subagent`.
 
 ---
 
-## 文件放在哪里
+## Where Files Go
 
-Whale 会自动发现两个位置：
+Whale discovers subagents from two locations:
 
-| 位置 | 适合谁 | 是否建议提交 |
+| Path | Scope | Commit it? |
 |---|---|---|
-| `.whale/agents/<name>.md` | 当前项目或团队共享 | 是 |
-| `~/.whale/agents/<name>.md` | 你个人所有项目通用 | 否 |
+| `.whale/agents/<name>.md` | Current project or team | Yes |
+| `~/.whale/agents/<name>.md` | Your personal global agents | No |
 
-同名时，项目级 `.whale/agents` 优先于全局 `~/.whale/agents`。
+If both exist with the same name, the project-level `.whale/agents` definition wins.
 
-文件名就是默认名字。例如 `reviewer.md` 的角色名是 `reviewer`。也可以在 frontmatter 里显式写 `name`。
+The filename is the default role name. For example, `reviewer.md` becomes `reviewer`. You can also set `name` in the frontmatter.
 
-名字只能包含字母、数字和连字符，长度最多 64 个字符。推荐使用 kebab-case，例如 `security-reviewer`。
+Names may contain letters, digits, and hyphens, up to 64 characters. Kebab-case names such as `security-reviewer` are recommended.
 
 ---
 
-## Markdown 格式
+## Markdown Format
 
-一个 subagent 文件由两部分组成：
+A subagent file has two parts:
 
-1. 顶部 `---` 之间的 frontmatter：描述名字、工具、权限等配置
-2. 下面的正文：这个 subagent 的角色说明和工作方式
+1. Frontmatter between `---` lines: name, tools, permissions, and other settings.
+2. Body text: the role instructions for the subagent.
 
 ```markdown
 ---
@@ -108,32 +108,32 @@ Look for authorization bypasses, secret leaks, unsafe shell usage, injection ris
 and missing validation. Report evidence and uncertainty clearly.
 ```
 
-`description` 是必填项。`whenToUse` 可选，但强烈建议写清楚，这样主 agent 更容易知道什么时候该用它。
+`description` is required. `whenToUse` is optional, but strongly recommended because it helps the main agent know when to use the role.
 
 ---
 
-## 常用字段
+## Common Fields
 
-| 字段 | 作用 | 示例 |
+| Field | What it does | Example |
 |---|---|---|
-| `name` | 显式指定 subagent 名字；不写时用文件名 | `security-reviewer` |
-| `description` | 一句话说明这个角色做什么 | `Review local code changes.` |
-| `whenToUse` | 什么时候应该使用它 | `Use before merging auth changes.` |
-| `tools` | 允许使用的工具能力 | `workspace.read` |
-| `disallowedTools` | 从允许工具里排除某些能力或工具 | `web.fetch` |
-| `model` | 指定模型；通常不用写 | `deepseek-chat` |
-| `effort` | 推理强度 | `high` |
-| `permissionMode` | 权限模式 | `read_only` |
-| `maxTurns` | 子会话最多轮数 | `8` |
-| `skills` | 给这个 subagent 加载的技能名 | `review-skill` |
-| `mcpServers` | 给这个 subagent 暴露的 MCP server | `github` |
-| `initialPrompt` | 子会话开始前先注入的提示 | `Read the diff first.` |
-| `memory` | 可用记忆范围 | `project` |
-| `background` | 是否后台运行 | `true` |
-| `isolation` | 是否使用 worktree 隔离 | `worktree` |
-| `generation` | 高级生成控制 | 见下方 |
+| `name` | Explicit subagent name. Defaults to the filename. | `security-reviewer` |
+| `description` | One-line summary of the role | `Review local code changes.` |
+| `whenToUse` | When the role should be used | `Use before merging auth changes.` |
+| `tools` | Tool capabilities to allow | `workspace.read` |
+| `disallowedTools` | Capabilities or tools to remove | `web.fetch` |
+| `model` | Model override. Usually omit this. | `deepseek-chat` |
+| `effort` | Reasoning effort | `high` |
+| `permissionMode` | Permission mode | `read_only` |
+| `maxTurns` | Max child-session turns | `8` |
+| `skills` | Skills loaded into this subagent | `review-skill` |
+| `mcpServers` | MCP servers exposed to this subagent | `github` |
+| `initialPrompt` | Prompt injected before the task | `Read the diff first.` |
+| `memory` | Memory scope | `project` |
+| `background` | Run in the background | `true` |
+| `isolation` | Worktree isolation | `worktree` |
+| `generation` | Advanced generation steering | See below |
 
-新手建议只先用这几个字段：
+For a first custom subagent, start with only:
 
 ```yaml
 description: ...
@@ -144,9 +144,9 @@ permissionMode: read_only
 
 ---
 
-## 高级：生成控制
+## Advanced: Generation Steering
 
-`generation` 可以给 model-only subagent 配置 assistant 回复前缀。如果当前 provider 支持 prefix completion，Whale 会让模型从这个前缀继续生成。
+`generation` can configure an assistant response prefix for model-only subagents. When the current provider supports prefix completion, Whale asks the model to continue from that prefix.
 
 ```yaml
 description: Return a compact classification.
@@ -156,42 +156,42 @@ generation:
   prefixCompletion: true
 ```
 
-这个功能只在没有工具的 subagent 上启用。带 `workspace.read`、`shell.read` 等工具的 subagent 会继续走普通生成路径，避免因为 prefix completion 失去工具调用能力。
+This is only enabled for subagents without tools. Subagents with `workspace.read`, `shell.read`, or other tools keep using the normal generation path so prefix completion does not remove tool-calling ability.
 
 ---
 
-## 工具和权限怎么选
+## Choosing Tools and Permissions
 
-默认从最小权限开始。大多数 reviewer、architect、explainer 都应该只读。
+Start with least privilege. Most reviewers, architects, and explainers should be read-only.
 
-常见 `tools`：
+Common `tools` values:
 
-| 工具能力 | 能做什么 | 新手建议 |
+| Capability | What it allows | Beginner guidance |
 |---|---|---|
-| `workspace.read` | 读取项目文件、搜索代码 | 默认使用 |
-| `shell.read` | 运行偏只读的 shell 命令 | 需要看 git diff、测试列表时使用 |
-| `web.search` | 搜索网页 | research 类型使用 |
-| `web.fetch` | 抓取网页内容 | research 类型使用 |
-| `mcp.read` | 使用已配置 MCP 工具 | 需要 MCP 时使用 |
-| `workspace.write` | 修改文件 | 谨慎使用 |
-| `shell.run` | 执行命令 | 谨慎使用 |
+| `workspace.read` | Read and search project files | Good default |
+| `shell.read` | Run read-oriented shell commands | Use for git diff, listing tests, and similar checks |
+| `web.search` | Search the web | Use for research roles |
+| `web.fetch` | Fetch web pages | Use for research roles |
+| `mcp.read` | Use configured MCP tools | Use only when needed |
+| `workspace.write` | Edit files | Use carefully |
+| `shell.run` | Run shell commands | Use carefully |
 
-权限模式：
+Permission modes:
 
-| `permissionMode` | 含义 | 适合场景 |
+| `permissionMode` | Meaning | Good for |
 |---|---|---|
-| `read_only` | 只读，最安全 | 默认推荐 |
-| `ask` | 需要敏感操作时询问 | 需要偶尔修改或执行命令 |
-| `auto` | 自动接受部分操作 | 你信任这个 subagent 的编辑任务 |
-| `trusted` | 更高信任级别 | 只给非常明确、受控的角色 |
+| `read_only` | Read-only and safest | Default recommendation |
+| `ask` | Ask before sensitive operations | Occasional edits or commands |
+| `auto` | Auto-accept some operations | Trusted editing tasks |
+| `trusted` | Higher-trust mode | Very explicit, controlled roles |
 
-如果你给 subagent `workspace.write` 或 `shell.run`，请同时明确写 `permissionMode`。不要把写权限给模糊角色。
+If you give a subagent `workspace.write` or `shell.run`, set `permissionMode` explicitly. Avoid giving write-capable tools to vague roles.
 
 ---
 
-## 在 Workflow 里使用自定义 Subagent
+## Using a Custom Subagent in a Workflow
 
-如果你已经有 `.whale/agents/reviewer.md`，workflow 可以这样调用：
+If you already have `.whale/agents/reviewer.md`, a workflow can call it like this:
 
 ```javascript
 export const meta = {
@@ -207,7 +207,7 @@ export default async function main() {
 }
 ```
 
-也可以在 workflow 里临时写一个 agent 定义，不落盘：
+You can also define a one-off subagent directly inside a workflow:
 
 ```javascript
 return agent("Check the API design for long-term maintainability.", {
@@ -220,13 +220,13 @@ return agent("Check the API design for long-term maintainability.", {
 });
 ```
 
-落盘定义适合复用；临时定义适合某个 workflow 独有的角色。
+Use saved files for reusable roles. Use inline definitions for roles that only belong to one workflow.
 
 ---
 
-## 插件里的 Subagent
+## Subagents in Plugins
 
-如果你在写插件，也可以在插件目录下放：
+Plugin authors can also add:
 
 ```text
 my-plugin/
@@ -234,37 +234,37 @@ my-plugin/
     └── reviewer.md
 ```
 
-安装并启用插件后，它会变成带插件前缀的角色，例如：
+After the plugin is installed and enabled, that role gets a plugin prefix:
 
 ```text
 my-plugin:reviewer
 ```
 
-插件方式适合发布给别人安装。只给自己或团队项目用时，优先用 `.whale/agents`。
+Plugins are best when you want to package a role for other people. For your own project or team, prefer `.whale/agents`.
 
-更多插件说明见 [Plugins](plugins.md)。
-
----
-
-## 排错
-
-| 问题 | 可能原因 | 解决方法 |
-|---|---|---|
-| Whale 没有使用我的 subagent | 文件不在 `.whale/agents` 或 `~/.whale/agents` | 检查路径，然后开新会话 |
-| 提示 unsupported subagent role | 名字写错，或文件名不符合规则 | 确认角色名和文件名一致 |
-| 文件被忽略 | Markdown 没有 frontmatter | 文件必须以 `---` 开头并有结束的 `---` |
-| 提示 description is required | 没写 `description` | 增加 `description` |
-| Subagent 不能执行命令 | 只给了 `workspace.read` | 加 `shell.read` 或 `shell.run`，并确认权限模式 |
-| Subagent 不能改文件 | 没有 `workspace.write` | 只在确实需要时添加，并使用 `ask` 或更高权限模式 |
+See [Plugins](plugins.md) for plugin details.
 
 ---
 
-## 和 Skills、Workflow 的区别
+## Troubleshooting
 
-| 能力 | 你在定义什么 | 适合 |
+| Problem | Likely cause | Fix |
 |---|---|---|
-| Skill | 给主 agent 的知识、流程、偏好 | "遇到这种任务时按这个方法做" |
-| Subagent | 一个可被启动的角色化子智能体 | "让 reviewer 单独审查这件事" |
-| Workflow | 一段固定编排脚本 | "先并行研究，再综合，再复核" |
+| Whale does not use my subagent | File is not under `.whale/agents` or `~/.whale/agents` | Check the path and start a new session |
+| `unsupported subagent role` | Name typo or invalid filename | Check the role name and filename |
+| File is ignored | Markdown has no frontmatter | Start the file with `---` and close the frontmatter with `---` |
+| `description is required` | Missing `description` | Add `description` |
+| Subagent cannot run commands | Only `workspace.read` is allowed | Add `shell.read` or `shell.run`, then check permission mode |
+| Subagent cannot edit files | No `workspace.write` capability | Add it only when needed and use `ask` or a higher permission mode |
 
-三者可以一起用：workflow 启动自定义 subagent，自定义 subagent 再加载特定 skill。
+---
+
+## Subagents vs Skills vs Workflows
+
+| Feature | What you define | Good for |
+|---|---|---|
+| Skill | Knowledge, process, or preference for the main agent | "When this task appears, follow this method." |
+| Subagent | A named child-agent role | "Have the reviewer inspect this separately." |
+| Workflow | A fixed orchestration script | "Research in parallel, synthesize, then verify." |
+
+They can work together: a workflow can start a custom subagent, and that subagent can load specific skills.

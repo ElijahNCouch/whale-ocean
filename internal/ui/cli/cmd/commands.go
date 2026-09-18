@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/attachments"
+	"github.com/usewhale/whale/internal/defaults"
 	"github.com/usewhale/whale/internal/session"
 	whaleworktree "github.com/usewhale/whale/internal/worktree"
 )
@@ -158,7 +160,7 @@ func newDoctorCmd(opts *cliOptions) *cobra.Command {
 func newSetupCmd(opts *cliOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "Save your DeepSeek API key for future Whale sessions",
+		Short: "Choose a model provider and save its key",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectWorktreeFlag(cmd); err != nil {
@@ -169,17 +171,86 @@ func newSetupCmd(opts *cliOptions) *cobra.Command {
 	}
 }
 
+// runSetup walks the free providers first, because the common case is someone
+// who wants a working agent without a billing account. A provider that needs
+// no key finishes immediately; the rest offer to open their console so the
+// key is a paste away rather than a search.
 func runSetup(out io.Writer, in io.Reader, dataDir string) error {
 	reader := bufio.NewReader(in)
-	envKey := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
-	fmt.Fprintln(out, "Whale setup")
-	if envKey != "" {
-		fmt.Fprintln(out, "DEEPSEEK_API_KEY is set in the current environment.")
-		fmt.Fprint(out, "DeepSeek API key (press enter to reuse current env value): ")
-	} else {
-		fmt.Fprint(out, "DeepSeek API key: ")
+	creds, err := app.LoadCredentials(dataDir)
+	if err != nil {
+		return err
 	}
+
+	all := defaults.Providers()
+	fmt.Fprintln(out, "Whale setup — pick a provider")
+	fmt.Fprintln(out)
+	for i, p := range all {
+		note := p.FreeTier
+		if note == "" {
+			note = "paid account"
+		}
+		status := ""
+		if app.ProviderUsable(p.ID, creds) {
+			status = "  [ready]"
+		}
+		fmt.Fprintf(out, "  %d) %-32s %s%s\n", i+1, p.Label, note, status)
+	}
+	if app.LocalModelRunning() {
+		fmt.Fprintln(out, "\n  A local Ollama server is already running on this machine.")
+	}
+	fmt.Fprintf(out, "\nProvider [1-%d, enter for %d]: ", len(all), 1)
+
 	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("read choice: %w", err)
+	}
+	choice := 1
+	if v := strings.TrimSpace(line); v != "" {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil || n < 1 || n > len(all) {
+			return fmt.Errorf("pick a number between 1 and %d", len(all))
+		}
+		choice = n
+	}
+	chosen := all[choice-1]
+
+	if !chosen.NeedsKey() {
+		if err := app.SaveCredentials(dataDir, creds); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "\nUsing %s with model %s.\n", chosen.Label, chosen.DefaultModel())
+		if chosen.ID == defaults.ProviderOllama && !app.LocalModelRunning() {
+			fmt.Fprintf(out, "No server is listening yet. Install it from %s, then run:\n", chosen.ConsoleURL)
+			fmt.Fprintf(out, "  ollama pull %s\n", chosen.DefaultModel())
+		}
+		fmt.Fprintf(out, "Set provider = \"%s\" in .whale/config.toml, or run: whale --provider %s\n", chosen.ID, chosen.ID)
+		return nil
+	}
+
+	if chosen.ConsoleURL != "" {
+		fmt.Fprintf(out, "\nGet a key at %s\n", chosen.ConsoleURL)
+		fmt.Fprint(out, "Open that page now? [Y/n]: ")
+		ans, ansErr := reader.ReadString('\n')
+		a := strings.ToLower(strings.TrimSpace(ans))
+		// Pressing enter means yes, but reaching the end of the input does
+		// not: setup is scripted in tests and in provisioning, and neither
+		// should have a browser window thrown at it.
+		if ansErr == nil && (a == "" || a == "y" || a == "yes") {
+			if openErr := app.OpenInBrowser(chosen.ConsoleURL); openErr != nil {
+				fmt.Fprintf(out, "Could not open a browser (%v) — copy the link above.\n", openErr)
+			}
+		}
+	}
+
+	envKey := strings.TrimSpace(os.Getenv(chosen.KeyEnv))
+	if envKey != "" {
+		fmt.Fprintf(out, "%s is already set in this environment.\n", chosen.KeyEnv)
+		fmt.Fprintf(out, "%s key (enter to reuse it): ", chosen.Label)
+	} else {
+		fmt.Fprintf(out, "%s key: ", chosen.Label)
+	}
+	line, err = reader.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("read api key: %w", err)
 	}
@@ -187,14 +258,14 @@ func runSetup(out io.Writer, in io.Reader, dataDir string) error {
 	if key == "" {
 		key = envKey
 	}
-	if err := app.ValidateDeepSeekAPIKey(key); err != nil {
+	if err := app.ValidateProviderAPIKey(chosen.ID, key); err != nil {
 		return err
 	}
-	if err := app.SaveCredentials(dataDir, app.Credentials{DeepSeekAPIKey: key}); err != nil {
+	if err := app.SaveCredentials(dataDir, creds.WithKey(chosen.ID, key)); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "saved DeepSeek API key to %s\n", filepath.Join(dataDir, "credentials.json"))
-	fmt.Fprintln(out, "Run `whale` to start a session.")
+	fmt.Fprintf(out, "\nSaved the %s key to %s\n", chosen.Label, filepath.Join(dataDir, "credentials.json"))
+	fmt.Fprintf(out, "Model: %s · run `whale` to start.\n", chosen.DefaultModel())
 	return nil
 }
 

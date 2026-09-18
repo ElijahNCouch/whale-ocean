@@ -13,6 +13,7 @@ import (
 func DefaultConfig() Config {
 	return Config{
 		DataDir:                      store.DefaultDataDir(),
+		Provider:                     ProviderDeepSeek,
 		PermissionDefault:            policy.PermissionAllow,
 		PermissionRules:              policy.DefaultRules(),
 		AutoCompact:                  true,

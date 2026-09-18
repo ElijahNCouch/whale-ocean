@@ -57,11 +57,31 @@ func IsDeepSeekV4Model(model string) bool {
 
 // ContextWindowForModel returns the context window size in tokens for model.
 func ContextWindowForModel(model string) int {
-	if strings.TrimSpace(model) == "" {
+	return ContextWindowFor("", model)
+}
+
+// ContextWindowFor sizes the context for a model, preferring the window
+// declared by the provider serving it. A local 7B model and a Gemini Flash
+// differ by more than an order of magnitude here, so compaction has to know
+// which one it is talking to.
+func ContextWindowFor(provider, model string) int {
+	if strings.TrimSpace(model) == "" && strings.TrimSpace(provider) == "" {
 		return DefaultContextWindow
 	}
 	if IsDeepSeekV4Model(model) {
 		return DeepSeekV4ContextWindow
+	}
+	if p, ok := ProviderByID(provider); ok && p.ContextWindow > 0 {
+		return p.ContextWindow
+	}
+	if strings.TrimSpace(provider) == "" {
+		for _, p := range providers {
+			for _, m := range p.Models {
+				if strings.EqualFold(m, strings.TrimSpace(model)) && p.ContextWindow > 0 {
+					return p.ContextWindow
+				}
+			}
+		}
 	}
 	return DefaultContextWindow
 }

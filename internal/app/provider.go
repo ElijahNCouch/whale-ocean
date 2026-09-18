@@ -5,12 +5,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/usewhale/whale/internal/defaults"
 	"github.com/usewhale/whale/internal/llm"
 	"github.com/usewhale/whale/internal/llm/deepseek"
 	llmretry "github.com/usewhale/whale/internal/llm/retry"
 )
 
 type providerOptions struct {
+	Provider                 string
 	APIKey                   string
 	BaseURL                  string
 	Model                    string
@@ -27,20 +29,34 @@ type providerOptions struct {
 }
 
 func newDeepSeekProvider(opts providerOptions) (llm.Provider, error) {
+	provider := normalizeProvider(opts.Provider)
+	// Only DeepSeek understands the reasoning controls, the Responses API and
+	// prefix completion. Sending those to another OpenAI-compatible endpoint
+	// is at best ignored and at worst a 400, so they are gated here rather
+	// than at every call site.
+	isDeepSeek := provider == ProviderDeepSeek
+
 	dsOpts := []deepseek.Option{}
+	dsOpts = append(dsOpts, deepseek.WithProvider(provider))
 	if strings.TrimSpace(opts.APIKey) != "" {
 		dsOpts = append(dsOpts, deepseek.WithAPIKey(opts.APIKey))
 	}
-	if strings.TrimSpace(opts.BaseURL) != "" {
-		dsOpts = append(dsOpts, deepseek.WithBaseURL(opts.BaseURL))
+	baseURL := strings.TrimSpace(opts.BaseURL)
+	if baseURL == "" {
+		if p, ok := defaults.ProviderByID(provider); ok {
+			baseURL = p.BaseURL
+		}
+	}
+	if baseURL != "" {
+		dsOpts = append(dsOpts, deepseek.WithBaseURL(baseURL))
 	}
 	if strings.TrimSpace(opts.Model) != "" {
 		dsOpts = append(dsOpts, deepseek.WithModel(opts.Model))
 	}
-	dsOpts = append(dsOpts,
-		deepseek.WithReasoningEffort(opts.ReasoningEffort),
-		deepseek.WithThinking(opts.ThinkingEnabled),
-	)
+	if isDeepSeek {
+		dsOpts = append(dsOpts, deepseek.WithReasoningEffort(opts.ReasoningEffort))
+		dsOpts = append(dsOpts, deepseek.WithThinking(opts.ThinkingEnabled))
+	}
 	if hasRetryPolicy(opts.RetryPolicy) {
 		dsOpts = append(dsOpts, deepseek.WithRetryPolicy(opts.RetryPolicy))
 	}
@@ -53,7 +69,7 @@ func newDeepSeekProvider(opts providerOptions) (llm.Provider, error) {
 	if opts.MaxTokens > 0 {
 		dsOpts = append(dsOpts, deepseek.WithMaxTokens(opts.MaxTokens))
 	}
-	if opts.DeepSeekPrefixCompletion {
+	if opts.DeepSeekPrefixCompletion && isDeepSeek {
 		dsOpts = append(dsOpts, deepseek.WithPrefixCompletion(true))
 	}
 	if opts.DeepSeekMultimodal.Enabled {
@@ -76,7 +92,11 @@ func newDeepSeekProvider(opts providerOptions) (llm.Provider, error) {
 		}))
 	}
 	dsOpts = append(dsOpts, deepseek.WithWebSearchMode(opts.DeepSeekWebSearch))
-	dsOpts = append(dsOpts, deepseek.WithAPI(opts.DeepSeekAPI))
+	if isDeepSeek {
+		dsOpts = append(dsOpts, deepseek.WithAPI(opts.DeepSeekAPI))
+	} else {
+		dsOpts = append(dsOpts, deepseek.WithAPI(deepseek.APIChatCompletions))
+	}
 	return deepseek.New(dsOpts...)
 }
 

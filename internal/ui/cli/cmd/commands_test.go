@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/usewhale/whale/internal/app"
+	"github.com/usewhale/whale/internal/defaults"
 	"github.com/usewhale/whale/internal/llm/deepseek"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/runtime/protocol"
@@ -29,16 +30,37 @@ import (
 // localExecConfig returns a default config pinned to the local web_search mode:
 // exec tests mock the chat-completions endpoint, and the default (auto) mode
 // would route deepseek-v4-flash through the Responses API.
-func localExecConfig() app.Config {
+//
+// The data directory is a temporary one because the global config file lives
+// there. Left at its default, these tests read ~/.whale/config.toml and take on
+// whatever model and provider the developer happens to use, which makes them
+// pass or fail depending on whose machine they run on.
+func localExecConfig(t *testing.T) app.Config {
+	t.Helper()
 	cfg := app.DefaultConfig()
 	cfg.DeepSeekWebSearch = deepseek.WebSearchModeLocal
+	cfg.DataDir = t.TempDir()
 	return cfg
 }
 
-func TestRunSetupSavesCredentials(t *testing.T) {
+// providerChoice is the 1-based menu position of a provider, worked out from
+// the registry so adding a provider does not silently repoint these tests at
+// a different one.
+func providerChoice(t *testing.T, id string) int {
+	t.Helper()
+	for i, p := range defaults.Providers() {
+		if p.ID == id {
+			return i + 1
+		}
+	}
+	t.Fatalf("provider %q is not in the registry", id)
+	return 0
+}
+
+func TestRunSetupSavesKeyForChosenProvider(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	in := strings.NewReader("sk-1234567890abcdef1234\n")
+	in := strings.NewReader(fmt.Sprintf("%d\nn\nsk-1234567890abcdef1234\n", providerChoice(t, defaults.ProviderDeepSeek)))
 
 	if err := runSetup(&out, in, dir); err != nil {
 		t.Fatalf("runSetup: %v", err)
@@ -48,21 +70,79 @@ func TestRunSetupSavesCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCredentials: %v", err)
 	}
+	if got := creds.KeyFor(defaults.ProviderDeepSeek); got != "sk-1234567890abcdef1234" {
+		t.Fatalf("deepseek key: got %q", got)
+	}
 	if creds.DeepSeekAPIKey != "sk-1234567890abcdef1234" {
-		t.Fatalf("deepseek_api_key: got %q", creds.DeepSeekAPIKey)
+		t.Fatalf("expected the legacy field to stay populated, got %q", creds.DeepSeekAPIKey)
 	}
 	if !strings.Contains(out.String(), filepath.Join(dir, "credentials.json")) {
 		t.Fatalf("expected output to mention credentials path, got %q", out.String())
 	}
 }
 
+func TestRunSetupOffersFreeProvidersFirst(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	// Choose the local provider, which needs no key and so ends the flow.
+	in := strings.NewReader(fmt.Sprintf("%d\n", providerChoice(t, defaults.ProviderOllama)))
+
+	if err := runSetup(&out, in, dir); err != nil {
+		t.Fatalf("runSetup: %v", err)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "Google Gemini") || !strings.Contains(rendered, "free tier") {
+		t.Fatalf("expected the free options to be listed, got %q", rendered)
+	}
+	if strings.Index(rendered, "Google Gemini") > strings.Index(rendered, "DeepSeek") {
+		t.Fatalf("expected free providers before paid ones, got %q", rendered)
+	}
+	creds, err := app.LoadCredentials(dir)
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	// Stored state only: ConfiguredProviders also reports keys found in the
+	// environment, which the machine running the tests may well have.
+	if len(creds.Keys) != 0 || creds.DeepSeekAPIKey != "" || creds.GitHubCopilotToken != "" {
+		t.Fatalf("a keyless provider should not have stored a credential, got %+v", creds)
+	}
+}
+
+func TestRunSetupKeepsExistingKeysForOtherProviders(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.SaveCredentials(dir, app.Credentials{}.WithKey(defaults.ProviderGroq, "gsk-existing")); err != nil {
+		t.Fatalf("SaveCredentials: %v", err)
+	}
+	var out bytes.Buffer
+	in := strings.NewReader(fmt.Sprintf("%d\nn\nsk-1234567890abcdef1234\n", providerChoice(t, defaults.ProviderDeepSeek)))
+	if err := runSetup(&out, in, dir); err != nil {
+		t.Fatalf("runSetup: %v", err)
+	}
+	creds, err := app.LoadCredentials(dir)
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if got := creds.KeyFor(defaults.ProviderGroq); got != "gsk-existing" {
+		t.Fatalf("expected the groq key to survive, got %q", got)
+	}
+}
+
 func TestRunSetupRejectsInvalidKey(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	in := strings.NewReader("invalid\n")
+	in := strings.NewReader(fmt.Sprintf("%d\nn\ninvalid\n", providerChoice(t, defaults.ProviderDeepSeek)))
 
 	if err := runSetup(&out, in, dir); err == nil {
 		t.Fatal("expected invalid key error")
+	}
+}
+
+func TestRunSetupRejectsOutOfRangeChoice(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	in := strings.NewReader("99\n")
+	if err := runSetup(&out, in, dir); err == nil {
+		t.Fatal("expected an out-of-range provider choice to be rejected")
 	}
 }
 
@@ -247,7 +327,7 @@ func TestAppServerCommandRunsStdioProtocol(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	var out bytes.Buffer
@@ -284,7 +364,7 @@ func TestPrepareCLIConfigLoadsConfigAndAppliesFlagOverride(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("model", "deepseek-v4-flash"); err != nil {
@@ -318,7 +398,7 @@ func TestPrepareCLIConfigPreservesConfiguredThinking(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := prepareCLIConfig(root, opts); err != nil {
@@ -346,7 +426,7 @@ func TestPrepareCLIConfigExplicitThinkingFalseOverridesConfig(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("thinking", "false"); err != nil {
@@ -385,7 +465,7 @@ func TestPrepareCLIConfigExplicitThinkingTrueOverridesConfig(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("thinking", "true"); err != nil {
@@ -415,7 +495,7 @@ func TestPrepareCLIConfigExplicitEffortOverridesConfig(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("effort", "max"); err != nil {
@@ -450,7 +530,7 @@ func TestPrepareCLIConfigDangerouslySkipPermissionsOverridesConfig(t *testing.T)
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("dangerously-skip-permissions", "true"); err != nil {
@@ -483,7 +563,7 @@ func TestPrepareCLIConfigDangerouslySkipPermissionsAppliesToSubcommands(t *testi
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("dangerously-skip-permissions", "true"); err != nil {
 		t.Fatalf("set dangerously-skip-permissions: %v", err)
@@ -513,7 +593,7 @@ func TestPrepareWorktreeRunsBeforeConfigLoad(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("worktree", "feature/test"); err != nil {
@@ -554,7 +634,7 @@ func TestPrepareWorktreePreservesSubdirectoryWorkspace(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("worktree", "subdir"); err != nil {
@@ -584,7 +664,7 @@ func TestUnsupportedSubcommandsRejectWorktree(t *testing.T) {
 		{"resume", "--worktree=x"},
 		{"setup", "--worktree=x"},
 	} {
-		opts := &cliOptions{cfg: localExecConfig()}
+		opts := &cliOptions{cfg: localExecConfig(t)}
 		root := newRootCmd(opts)
 		var out bytes.Buffer
 		root.SetOut(&out)
@@ -608,7 +688,7 @@ func TestPrepareCLIConfigRejectsUnsupportedEffortAlias(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("effort", "xhigh"); err != nil {
 		t.Fatalf("set effort: %v", err)
@@ -642,7 +722,7 @@ func TestPrepareCLIConfigKeepsUnspecifiedThinkingAndEffortFromConfig(t *testing.
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := prepareCLIConfig(root, opts); err != nil {
@@ -667,7 +747,7 @@ func TestReadExecPromptPrefersArg(t *testing.T) {
 }
 
 func TestExecHelpShowsSessionAndMode(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -685,7 +765,7 @@ func TestExecHelpShowsSessionAndMode(t *testing.T) {
 }
 
 func TestRootHelpHidesSessionAndMode(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -703,7 +783,7 @@ func TestRootHelpHidesSessionAndMode(t *testing.T) {
 }
 
 func TestExecCombinedArgsParse(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	execCmd, _, err := root.Find([]string{"exec"})
 	if err != nil {
@@ -746,7 +826,7 @@ func TestExecRunERejectsInvalidModeBeforeProvider(t *testing.T) {
 			t.Fatalf("Chdir: %v", err)
 		}
 
-		opts := &cliOptions{cfg: localExecConfig()}
+		opts := &cliOptions{cfg: localExecConfig(t)}
 		opts.cfg.DataDir = dir
 		root := newRootCmd(opts)
 		root.SetArgs([]string{"exec", "--mode", m, "hi"})
@@ -780,7 +860,7 @@ func TestExecInvalidModeDoesNotCreateWorktree(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	root.SetArgs([]string{"exec", "--worktree=feature-x", "--mode", "bogus", "hi"})
@@ -817,7 +897,7 @@ func TestExecJSONErrorOutputOnce(t *testing.T) {
 	defer func() { _ = os.Chdir(oldwd) }()
 
 	var out bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	root := newRootCmd(opts)
 	root.SetOut(&out)
@@ -862,7 +942,7 @@ func TestExecJSONErrorNotDoubleEmittedOnRunFailure(t *testing.T) {
 	defer func() { _ = os.Chdir(oldwd) }()
 
 	var out bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	root := newRootCmd(opts)
 	root.SetOut(&out)
@@ -904,7 +984,7 @@ func TestExecJSONRuntimeFailureDoesNotPolluteStderr(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	root := newRootCmd(opts)
 	root.SetOut(&out)
@@ -946,7 +1026,7 @@ func TestExecRunEAcceptsExplicitValidMode(t *testing.T) {
 	defer func() { _ = os.Chdir(oldwd) }()
 
 	var out bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	root := newRootCmd(opts)
 	root.SetOut(&out)
@@ -957,7 +1037,7 @@ func TestExecRunEAcceptsExplicitValidMode(t *testing.T) {
 }
 
 func TestExecModeFlagValidation(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	execCmd, _, err := newRootCmd(opts).Find([]string{"exec"})
 	if err != nil {
 		t.Fatalf("find exec: %v", err)
@@ -1022,7 +1102,7 @@ func TestRunExecTextOutput(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader(""), opts, []string{"hi"}, false, 0, nil, "", ""); err != nil {
 		t.Fatalf("runExec: %v", err)
@@ -1054,7 +1134,7 @@ func TestRunExecJSONOutput(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("stdin prompt"), opts, nil, true, 0, nil, "", ""); err != nil {
 		t.Fatalf("runExec: %v", err)
@@ -1102,7 +1182,7 @@ func TestRunExecResumeSeededEmptySessionAppendsHistory(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("first round"), opts, nil, true, 0, nil, "run-1", ""); err != nil {
 		t.Fatalf("runExec on seeded empty session: %v", err)
@@ -1151,7 +1231,7 @@ func TestRunExecResumeSessionAppendsHistory(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("second round"), opts, nil, true, 0, nil, "s1", ""); err != nil {
 		t.Fatalf("runExec resume: %v", err)
@@ -1229,7 +1309,7 @@ func TestRunExecResumeRestoresWorktreeContext(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	if err := runExec(&out, &errOut, strings.NewReader("resume round"), opts, nil, true, 0, nil, "s1", ""); err != nil {
 		t.Fatalf("runExec resume: %v", err)
@@ -1281,7 +1361,7 @@ func TestRunExecResumeUnknownSessionFails(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("hi"), opts, nil, true, 0, nil, "missing", ""); err == nil {
 		t.Fatal("expected resume of unknown session to fail")
@@ -1315,7 +1395,7 @@ func TestRunExecPlanModeSingleRoundExits(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("plan this"), opts, nil, false, 0, nil, "", "plan"); err != nil {
 		t.Fatalf("runExec plan mode: %v", err)
@@ -1355,7 +1435,7 @@ func TestRunExecResumeSavesExplicitModeForNextRound(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("plan this"), opts, nil, true, 0, nil, "s1", "plan"); err != nil {
 		t.Fatalf("runExec with explicit mode: %v", err)
@@ -1401,7 +1481,7 @@ func TestRunExecRejectedResumeDoesNotSaveMode(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("hi"), opts, nil, true, 0, nil, "missing", "plan"); err == nil {
 		t.Fatal("expected rejected resume to fail")
@@ -1513,7 +1593,7 @@ func TestRunExecResumeKeepsSavedMode(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	if err := runExec(&out, &errOut, strings.NewReader("again"), opts, nil, true, 0, nil, "s1", ""); err != nil {
 		t.Fatalf("runExec resume: %v", err)
@@ -1738,7 +1818,7 @@ func TestRunExecAttachSendsOpenAICompatibleFilePart(t *testing.T) {
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	opts.cfg.DeepSeekMultimodal = app.MultimodalProviderConfig{
 		Enabled: true,
@@ -1825,7 +1905,7 @@ func TestRootExecAppliesThinkingAndEffortOverridesWithoutChangingTextOutput(t *t
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dir
 	root := newRootCmd(opts)
 	var out bytes.Buffer
@@ -1855,7 +1935,7 @@ func TestRootExecAppliesThinkingAndEffortOverridesWithoutChangingTextOutput(t *t
 }
 
 func TestPrepareCLIConfigMarksExplicitDefaultModel(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	cmd := &cobra.Command{Use: "test"}
 	cmd.Flags().String("model", opts.cfg.Model, "")
 	if err := cmd.Flags().Set("model", "deepseek-v4-flash"); err != nil {
@@ -1870,7 +1950,7 @@ func TestPrepareCLIConfigMarksExplicitDefaultModel(t *testing.T) {
 }
 
 func TestRootHelpOnlyShowsPublicRootFlags(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -1922,7 +2002,7 @@ func TestExecRejectsUnsupportedEffortBeforeRun(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -1944,7 +2024,7 @@ func TestExecRejectsUnsupportedEffortBeforeRun(t *testing.T) {
 }
 
 func TestThinkingAndEffortFlagsArePersistent(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 
 	if root.PersistentFlags().Lookup("thinking") == nil {
@@ -1973,7 +2053,7 @@ func TestThinkingAndEffortFlagsArePersistent(t *testing.T) {
 }
 
 func TestWorktreeFlagIsOptionalValuePersistentFlag(t *testing.T) {
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	root := newRootCmd(opts)
 	flag := root.PersistentFlags().Lookup("worktree")
 	if flag == nil {
@@ -2095,7 +2175,7 @@ func TestRootExecuteSupportsSeparatedWorktreeName(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	root.SetArgs(normalizeWorktreeArgs([]string{"exec", "--worktree", "feature-x", "--effort=low", "hi"}, true))
@@ -2119,7 +2199,7 @@ func TestRootExecBareWorktreePreservesPrompt(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = t.TempDir()
 	root := newRootCmd(opts)
 	root.SetArgs(normalizeWorktreeArgs([]string{"exec", "--worktree", "--effort=low", "fix bug"}, true))
@@ -2145,7 +2225,7 @@ func TestPrepareResumeWorktreeChdirsBeforeConfigLoad(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("worktree", "resume-test"); err != nil {
@@ -2171,7 +2251,7 @@ func TestPrepareResumeWorktreeChdirsBeforeConfigLoad(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatalf("Chdir repo: %v", err)
 	}
-	opts = &cliOptions{cfg: localExecConfig()}
+	opts = &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	if err := prepareResumeWorktree([]string{"resume-session"}, false, opts); err != nil {
 		t.Fatalf("prepareResumeWorktree: %v", err)
@@ -2205,7 +2285,7 @@ func TestPrepareResumeWorktreeUsesRecordedSubdirectoryWorkspace(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	root := newRootCmd(opts)
 	if err := root.PersistentFlags().Set("worktree", "resume-subdir"); err != nil {
@@ -2229,7 +2309,7 @@ func TestPrepareResumeWorktreeUsesRecordedSubdirectoryWorkspace(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatalf("Chdir repo: %v", err)
 	}
-	opts = &cliOptions{cfg: localExecConfig()}
+	opts = &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	if err := prepareResumeWorktree([]string{"resume-subdir-session"}, false, opts); err != nil {
 		t.Fatalf("prepareResumeWorktree: %v", err)
@@ -2261,7 +2341,7 @@ func TestPrepareResumeWorktreeMissingPathFallsBack(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save session meta: %v", err)
 	}
-	opts := &cliOptions{cfg: localExecConfig()}
+	opts := &cliOptions{cfg: localExecConfig(t)}
 	opts.cfg.DataDir = dataDir
 	if err := prepareResumeWorktree([]string{"resume-session"}, false, opts); err != nil {
 		t.Fatalf("prepareResumeWorktree: %v", err)

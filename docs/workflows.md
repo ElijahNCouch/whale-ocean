@@ -1,117 +1,131 @@
 # Dynamic Workflows
 
-> **⚠️ 默认关闭**
+> **⚠️ Disabled by default**
 >
-> Dynamic Workflows 在使用前需要先启用。在 TUI 中运行 `/config`，
-> 开启 `Dynamic workflows` 开关；或添加到 `.whale/config.local.toml`：
+> Dynamic Workflows must be enabled before first use. Run `/config` in the TUI
+> and toggle `Dynamic workflows` on, or add to `.whale/config.local.toml`:
 >
 > ```toml
 > [workflows]
 > enabled = true
 > ```
 >
-> 已有项目？如果 workflow 不显示，检查 `.whale/config.local.toml` 或 `.whale/config.toml`。
+> Existing project? Check `.whale/config.local.toml` or `.whale/config.toml`
+> if workflows aren't showing up.
 
-Whale 支持 **dynamic workflows**：JavaScript 脚本编排多个子 agent，
-控制流由脚本决定（循环、扇出、barrier），每个 `agent()` 调用做实际的 LLM 工作。
+Whale supports **dynamic workflows**: JavaScript scripts that orchestrate multiple
+sub-agents deterministically. The script controls the flow — loops, fan-outs, barriers —
+while each `agent()` call does the actual LLM work.
 
-如果你想先定义可复用的 reviewer、researcher 或 architect 角色，见
-[自定义 Subagent](agents.md)。
+If you want reusable reviewer, researcher, or architect roles first, see
+[Custom Subagents](agents.md).
 
-> **Claude Code 兼容**
+> **Claude Code Compatible**
 >
-> Whale 的 workflow 脚本格式与 **Claude Code raw script 完全兼容**。
-> 为 Claude Code 编写的 `.js` workflow 文件可以直接复制到
-> `.whale/workflows/`（项目级）或 `~/.whale/workflows/`（全局）下使用，
-> 无需修改脚本内容。
+> Whale's workflow script format is **fully compatible with Claude Code raw scripts**.
+> `.js` workflow files written for Claude Code can be copied directly to
+> `.whale/workflows/` (project-level) or `~/.whale/workflows/` (user-global)
+> and used as-is, with no changes to the script content.
 
 ---
 
-## 何时使用 Workflow
+## When to Use a Workflow
 
-| 维度 | 普通对话 | Workflow |
+| Aspect | Chat | Workflow |
 |---|---|---|
-| 谁决定下一步 | 模型逐轮决策 | 脚本 |
-| 中间结果在哪 | 对话上下文 | 脚本变量 |
-| 可重复性 | 每次即兴 | 编排被代码固化 |
-| 规模 | 每轮几个 agent 调用 | 几十上百个 |
-| 中断恢复 | 丢失上下文，重来 | 同 session 内可恢复 |
+| Who decides what runs next | The model, turn by turn | The script |
+| Where intermediate results live | Conversation context | Script variables |
+| Repeatability | Ad-hoc each time | Orchestration is codified |
+| Scale | A few agent calls per turn | Dozens to hundreds of agents per run |
+| Interruption | Loses context, restarts | Resumable within the same session |
 
-适用场景：
+Good use cases:
 
-- **扇出式研究** — 并行搜索多个角度，交叉验证结论
-- **多视角审查** — 从正确性/安全/性能等维度审查，然后综合
-- **流水线处理** — 让多个条目依次经过提取→转换→加载等阶段
-- **对抗性验证** — 让独立 agent 互相质疑，剔除不可靠的发现
-- **循环直到枯竭** — 持续发现直到连续几轮无新结果
-
----
-
-## 运行机制
-
-- **隔离执行** — 脚本运行在 QuickJS 沙箱中，与对话上下文隔离
-- **可恢复** — 同一 session 内，已完成 `agent()` 返回缓存结果
-- **无宿主 API** — 脚本不能直接访问文件系统、网络、`require()`，所有 IO 通过 `agent()` 叶子节点
-- **限制：**
-  - 默认最大 **3 个并发 agent**
-  - 可配置 agent 总调用上限
-  - 可选 **token budget** 控制总消耗
+- **Fan-out research** — Search multiple angles in parallel, cross-verify findings
+- **Multi-perspective review** — Review code/design from several lenses, then synthesize
+- **Pipeline processing** — Feed items through stages (extract → transform → load)
+- **Adversarial verification** — Spawn independent skeptics to refute each finding
+- **Loop-until-dry** — Keep finding candidates until consecutive rounds surface nothing new
 
 ---
 
-## 内置 Workflow
+## How a Workflow Runs
+
+- **Isolated execution** — The script runs in a QuickJS sandbox, separate from
+  your conversation context
+- **Resumable** — Within the same session, completed `agent()` calls return cached
+  results; only changed or new calls run live
+- **No host APIs** — The script cannot access the filesystem, network, or
+  `require()` directly; all I/O happens through `agent()` leaves
+- **Limits:**
+  - Up to **3 concurrent agents** by default
+  - Configurable agent call caps
+  - Optional **token budget** to cap total completion tokens
+
+---
+
+## Built-in Workflow
 
 ### `deep-research`
 
-深度研究：从多个角度并行搜索，抓取来源，对抗性验证，最终合成带引用的报告。
+Deep research harness — fans out web searches across several angles, fetches sources,
+adversarially verifies claims, and synthesizes a cited report.
 
 ```
-阶段：Scope → Search → Fetch → Verify → Synthesize
+Phases: Scope → Search → Fetch → Verify → Synthesize
 ```
 
 ---
 
-## 保存 Workflow
+## Saving Workflows for Reuse
 
-Whale 从两个位置发现 workflow 脚本：
+Whale discovers workflow scripts from two locations:
 
-| 位置 | 范围 | 共享方式 |
+| Location | Scope | Shared via |
 |---|---|---|
-| `.whale/workflows/<name>.js` | **项目级** | 版本控制，团队共享 |
-| `~/.whale/workflows/<name>.js` | **全局** | 个人所有项目可用 |
+| `.whale/workflows/<name>.js` | **Project-level** | Version control, team-wide |
+| `~/.whale/workflows/<name>.js` | **User-global** | Available across all projects |
 
-> 从 Claude Code 迁移：直接将 `.claude/workflows/<name>.js` 复制到上述任一目录即可。
+> Migrating from Claude Code: just copy `.claude/workflows/<name>.js` to
+> either location above.
 
-项目级覆盖全局同名 workflow。保存后自动被发现——
-在对话中描述你的需求，Whale 会按名调用。
-
----
-
-## 管理运行
-
-`/workflows` 打开工作流面板。
-
-- `↑` / `↓` 选择阶段或 agent
-- `Enter` / `→` 钻取详情（prompt、工具调用、结果）
-- `Esc` 返回上一层
-- `j` / `k` 在 agent 详情中滚动
-- `p` 暂停/恢复
-- `x` 停止运行
+Project-level workflows override user-global ones with the same name.
+Saved workflows are auto-discovered — describe what you need in the
+conversation and Whale will offer to run it by name.
 
 ---
 
-## 要求
+## Managing Runs
 
-所有付费计划可用（DeepSeek API）。功能默认关闭，可以按项目开启。
+Use `/workflows` to open the workflow panel.
 
-### 配置开关
+- `↑` / `↓` — Select a phase or agent
+- `Enter` / `→` — Drill into prompt, tool calls, and result
+- `Esc` — Back out one level
+- `j` / `k` — Scroll within agent detail
+- `p` — Pause/resume
+- `x` — Stop running agent or entire workflow
 
-在 TUI 中运行 `/config` 可以管理 workflow 开关：
+---
 
-- `Dynamic workflows`（`workflows.enabled`）控制 workflow runtime、`workflow` 工具、目录提示和 `/workflows` 面板集成。
-- `Workflow keyword trigger`（`workflows.keyword_trigger_enabled`）只控制按 workflow 目录提示自动触发使用；关闭后仍可手动运行 workflow。
+## Requirements
 
-在 `/config` 中按 `Space` 只会切换当前项并产生未保存变更；按 `Enter` 或 `Ctrl+S` 才会保存。保存后会写入当前项目的个人配置文件：
+Available on all paid plans (DeepSeek API). The feature is disabled by default,
+and can be enabled per project.
+
+### Configuration Toggles
+
+Run `/config` in the TUI to manage workflow settings:
+
+- `Dynamic workflows` (`workflows.enabled`) controls the workflow runtime,
+  `workflow` tool, catalog hints, and `/workflows` panel integration.
+- `Workflow keyword trigger` (`workflows.keyword_trigger_enabled`) only controls
+  whether catalog hints encourage automatic workflow use. Turning it off still
+  allows manually running workflows.
+
+In `/config`, `Space` toggles the selected item and creates an unsaved change;
+press `Enter` or `Ctrl+S` to save. Saved changes are written to the current
+project's personal config file:
 
 ```toml
 # .whale/config.local.toml
@@ -120,4 +134,6 @@ enabled = true
 keyword_trigger_enabled = true
 ```
 
-`.whale/config.local.toml` 只影响当前 workspace，不建议提交到版本控制。如果希望团队共享默认值，可以把同样的 `[workflows]` 配置写入 `.whale/config.toml`。
+`.whale/config.local.toml` only affects the current workspace and should not be
+committed. To share defaults with the team, put the same `[workflows]` settings
+in `.whale/config.toml`.

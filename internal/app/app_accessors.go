@@ -122,7 +122,9 @@ func (a *App) ViewMode() string {
 func (a *App) ListMessages() ([]core.Message, error) {
 	return a.msgStore.List(a.ctx, a.sessionID)
 }
-func (a *App) SupportedModels() []string { return defaults.SupportedModels() }
+func (a *App) SupportedModels() []string {
+	return defaults.ModelsForProvider(a.cfg.Provider)
+}
 func (a *App) SupportedEfforts() []string {
 	return SupportedReasoningEfforts()
 }
@@ -133,7 +135,7 @@ func (a *App) SetModelAndEffort(modelName, effort string) error {
 	if m == "" || e == "" {
 		return errors.New("model and effort are required")
 	}
-	if !containsString(a.SupportedModels(), m) {
+	if !containsString(a.SupportedModels(), m) && !defaults.ModelsAreOpen(a.cfg.Provider) {
 		return fmt.Errorf("unsupported model: %s", modelName)
 	}
 	if !containsString(a.SupportedEfforts(), e) {
